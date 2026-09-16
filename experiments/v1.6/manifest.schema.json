@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tracewell.example/schemas/v1.6-real-model-run-manifest.schema.json",
+  "title": "TRACE-Well V1.6 Real-Model Run Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "timestamp",
+    "code_sha",
+    "model_id",
+    "hf_revision",
+    "artifact_format",
+    "serving_engine",
+    "serving_engine_version",
+    "endpoint",
+    "decoding_determinism_class",
+    "generation_parameters",
+    "judge_prompt_version",
+    "rubric_version",
+    "chat_template_digest",
+    "rendered_prompt_digest",
+    "request_digest",
+    "response_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "minLength": 1},
+    "code_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "model_id": {"type": "string", "minLength": 1},
+    "hf_revision": {"type": "string", "minLength": 1},
+    "weights_digest": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "artifact_format": {
+      "type": "string",
+      "enum": ["safetensors", "gguf", "other"]
+    },
+    "artifact_reference": {"type": ["string", "null"]},
+    "quantization": {"type": ["string", "null"]},
+    "serving_engine": {"type": "string", "minLength": 1},
+    "serving_engine_version": {"type": "string", "minLength": 1},
+    "endpoint": {"type": "string", "minLength": 1},
+    "decoding_determinism_class": {
+      "type": "string",
+      "enum": ["deterministic", "seeded_stochastic", "unseeded_stochastic", "unknown"]
+    },
+    "seed": {"type": ["integer", "null"]},
+    "generation_parameters": {"type": "object"},
+    "judge_prompt_version": {"type": "string", "minLength": 1},
+    "rubric_version": {"type": "string", "minLength": 1},
+    "chat_template_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "rendered_prompt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "request_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "response_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "chat_template_path": {"type": "string", "minLength": 1},
+    "rendered_prompt_path": {"type": "string", "minLength": 1},
+    "request_path": {"type": "string", "minLength": 1},
+    "response_path": {"type": "string", "minLength": 1},
+    "notes": {"type": ["string", "null"]}
+  }
+}
