@@ -35,7 +35,7 @@ See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the authoritative V1.5 Proven
 
 ## V1.6 semantic-judge development status
 
-V1.6 is an additive semantic-evaluation extension built on top of the frozen V1.5 deterministic kernel. Its current scope is defined in [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md).
+V1.6 is an additive semantic-evaluation extension built on top of the frozen V1.5 deterministic kernel. Its current scope is defined in [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md), and the first empirical study is frozen in [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md).
 
 Implemented on this branch:
 
@@ -48,6 +48,16 @@ Implemented on this branch:
 - explicit deterministic-only `SafetyFinding` authority;
 - a localhost-only OpenAI-compatible adapter for a real local/open-model server, implemented without adding a model/provider SDK to the base runtime;
 - a blinded calibration harness that joins judge records to independent human labels by opaque item ID and records agreement/disagreement evidence.
+
+### Frozen initial study roles
+
+The initial V1.6 empirical study is **domain-agnostic and text-only**:
+
+- `Qwen/Qwen2.5-0.5B-Instruct` — Tier-0 transport control;
+- `nvidia/Nemotron-Mini-4B-Instruct` — Tier-1 semantic-judge candidate, admitted only after its model-specific chat template is verified in the chosen serving stack;
+- `google/medgemma-1.5-4b-it` — deferred to a later healthcare-domain specialization extension rather than included in the initial 24-item general corpus.
+
+The frozen plan requires the exact immutable upstream model revision actually used to be recorded for every empirical run. A model name alone is not sufficient provenance.
 
 ### Current V1.6 evidence boundary
 
@@ -192,7 +202,8 @@ For the frozen V1.5 base, read:
 For V1.6 semantic work, also read:
 
 12. [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md) — current semantic-judge scope, authority boundaries, adapter status, and calibration requirements.
-13. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
+13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen transport, model-admission, blinding, repetition, calibration, and ADR-0015 decision protocol.
+14. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
 
 ADR-0015 remains Proposed in the ADR registry; semantic-only FAIL propagation has not been accepted.
 
@@ -223,6 +234,8 @@ V1.5 is **Done**. Full **Proven** status remains blocked only by the blind indep
 
 ### V1.6 development branch
 
-The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, and calibration harness are implemented and covered by tests.
+The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, calibration harness, and frozen initial evaluation plan are implemented.
 
-Real local/open-model execution is supported by the adapter but has **not yet been established as calibrated or validated**. The next evidence step is to run a real local/open model, collect exact judge provenance and candidate labels, obtain blinded human/domain-expert labels, and generate a calibration report before considering ADR-0015.
+The initial empirical sequence is now fixed as transport control first, Nemotron admission second, and real blinded calibration third. MedGemma is deferred to a separate healthcare-domain specialization extension.
+
+Real local/open-model execution is supported by the adapter but has **not yet been established as calibrated or validated**. No semantic-only FAIL or finding authority has been granted.
