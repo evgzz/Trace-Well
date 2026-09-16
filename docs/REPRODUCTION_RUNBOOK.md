@@ -4,7 +4,42 @@ This procedure is the human/operator portion of PO-9. Automated CI cannot establ
 
 ## Purpose
 
-Demonstrate that a third party can obtain a clean checkout, install the documented environment, execute the deterministic harness, and reproduce the expected conclusion using only tracked repository information.
+Demonstrate that a third party can obtain a clean checkout, install the documented environment, execute the deterministic harness, and reproduce the expected conclusion using only tracked public repository information.
+
+The load-bearing claim is not merely that “someone else ran the code.” It is that an eligible independent operator can reproduce the result **from public documentation alone, without author clarification or unstored tribal knowledge**.
+
+## Independent operator eligibility
+
+The operator used for final PO-9 signoff should:
+
+- not be the original author;
+- have had no prior exposure to TRACE-Well design discussions, private planning notes, unpublished implementation guidance, or author walkthroughs;
+- not have participated in developing, debugging, reviewing, or preparing the V1.5 implementation or reproduction procedure;
+- receive only the public repository location and the tracked instructions in this runbook;
+- perform the reproduction from a clean checkout and environment.
+
+Prior familiarity with general Python, Git, CI, or evaluation-engineering concepts is acceptable. Prior knowledge of TRACE-Well-specific intent or undocumented conventions is not.
+
+If no sufficiently unexposed operator is available, PO-9 independent-human signoff remains pending. Do not weaken the eligibility standard merely to close the release gate.
+
+## No-side-channel rule
+
+During the signoff attempt, the operator must not receive author clarification, private messages, live walkthroughs, unpublished commands, or other TRACE-Well-specific assistance beyond tracked public repository material.
+
+Ordinary interpretation of standard tooling documentation is allowed. TRACE-Well-specific clarification from the author or another informed project participant is not.
+
+## Clarification / failure protocol
+
+If the operator cannot proceed using the public repository alone, or asks for TRACE-Well-specific clarification:
+
+1. **Stop the signoff attempt.** Do not answer the question through a private side channel and continue the same attempt.
+2. Record the blocking point as a **documentation or repository-sufficiency defect**, not as an operator failure.
+3. Fix the defect in tracked public documentation, code, CLI behavior, or repository structure as appropriate.
+4. Run the ordinary CI and automated clean-runner reproduction gates against the corrected commit.
+5. Restart the reproduction from a clean checkout of the corrected commit.
+6. Prefer a fresh eligible operator. If the same operator is reused, treat the earlier exposure as contamination and do not describe the rerun as blind unless the information they received was limited strictly to the now-public corrected material and the acceptance record makes that limitation explicit.
+
+A successful signoff must therefore be against **public repository material alone**, not public material plus an undocumented conversation.
 
 ## Preconditions
 
@@ -17,7 +52,7 @@ Use a machine or clean environment that does not rely on:
 - model credentials;
 - network inference services.
 
-Internet access may be used only to obtain the public repository and Python packages required by `pyproject.toml`.
+Internet access may be used only to obtain the public repository, Python packages required by `pyproject.toml`, and ordinary public documentation for standard tools when needed.
 
 ## Procedure
 
@@ -196,6 +231,8 @@ Operator identifier or role:
 Execution date:
 Python version:
 Platform:
+Prior TRACE-Well design exposure: none / describe
+Author or project-member clarification used: no / yes (if yes, attempt is not valid for signoff)
 pytest result:
 public-text scan result:
 PASS reproduction result:
@@ -204,12 +241,15 @@ REVIEW reproduction result:
 artifact digest match across mode-only change:
 holdout result:
 unexpected deviations:
+documentation defects encountered:
 ```
 
 Do not record private or sensitive personal information in the public repository unless intentionally approved for publication.
 
 ## PO-9 closure rule
 
-PO-9 independent reproduction is complete only when an operator other than the original author executes this runbook from a clean checkout and records the result.
+PO-9 independent reproduction is complete only when an **eligible independent operator with no prior TRACE-Well design exposure** executes this runbook from a clean checkout and records a successful result **using public repository documentation alone, without author or informed-project-member clarification**.
+
+If clarification was required, that attempt is evidence of a documentation/repository-sufficiency defect and is not a valid signoff. Correct the public material and repeat the procedure under the failure protocol above.
 
 The existence of this runbook, a passing automated clean-runner report, and green CI are necessary support, but are not themselves independent-operator signoff.
