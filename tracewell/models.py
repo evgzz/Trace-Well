@@ -77,7 +77,7 @@ class ExpectedInvariant(StrictModel):
 
     @model_validator(mode="after")
     def require_value_for_equals(self) -> "ExpectedInvariant":
-        if self.rule == "equals" and self.value is None:
+        if self.rule == "equals" and "value" not in self.model_fields_set:
             raise ValueError("ExpectedInvariant rule='equals' requires value")
         return self
 
