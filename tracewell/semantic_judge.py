@@ -38,6 +38,8 @@ class JudgeProvenance(StrictModel):
     generation_parameters: dict[str, Any] = Field(default_factory=dict)
     judge_prompt_version: str
     rubric_version: str
+    chat_template_digest: str | None = None
+    rendered_prompt_digest: str | None = None
 
 
 class JudgeRequest(StrictModel):
