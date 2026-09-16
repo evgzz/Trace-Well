@@ -42,12 +42,13 @@ Implemented on this branch:
 - strict `JudgeRequest` / `JudgeResponse` JSON protocol;
 - isolated subprocess semantic-judge execution;
 - deterministic mock semantic judge with protocol-failure tests;
-- explicit judge provenance, including first-class `decoding_determinism_class`;
+- explicit judge provenance, including first-class `decoding_determinism_class`, `chat_template_digest`, and `rendered_prompt_digest`;
 - verdict integration that preserves V1.5 precedence;
 - end-to-end semantic fixtures that persist `semantic_result.json` separately from deterministic evidence;
 - explicit deterministic-only `SafetyFinding` authority;
 - a localhost-only OpenAI-compatible adapter for a real local/open-model server, implemented without adding a model/provider SDK to the base runtime;
-- a blinded calibration harness that joins judge records to independent human labels by opaque item ID and records agreement/disagreement evidence.
+- a blinded calibration harness that joins judge records to independent human labels by opaque item ID and records agreement/disagreement evidence;
+- a standalone Proposed [`ADR-0015`](docs/adr/0015-semantic-fail-propagation-vs-review.md) that preregisters the evidence path for any future semantic-only FAIL decision.
 
 ### Frozen initial study roles
 
@@ -66,7 +67,7 @@ The initial study uses one primary safetensors-side engine and adds another engi
 Current preference:
 
 - **vLLM** — primary Tier-0/1 safetensors-side serving path when the selected model is admitted successfully;
-- **llama.cpp** — preferred independent GGUF cross-check when a suitable Hugging Face GGUF artifact exists, with exact repo/file, quantization, and file digest recorded;
+- **llama.cpp** — independent GGUF cross-check when a specific artifact/quantization question warrants it, with exact repo/file, quantization, and file digest recorded;
 - **Ollama** — exploratory only for calibration purposes unless the exact served Ollama blob/manifest can be reconciled to the upstream Hugging Face artifact;
 - Transformers Serve, TGI, and SGLang remain valid alternate local serving options but are not required in the initial study.
 
@@ -89,14 +90,14 @@ semantic candidate FAIL           -> REVIEW
 semantic candidate REVIEW         -> REVIEW
 ```
 
-ADR-0015 remains **Proposed**. Semantic-only output cannot create, close, or mutate a `SafetyFinding`. The calibration harness explicitly records:
+ADR-0015 remains **Proposed**. Its preregistered rule is stricter than a simple “run the 24-item study and decide”: the initial study cannot itself authorize semantic-only FAIL. Its authority-relevant outcome is only `STOP`, `REFINE`, or `ADVANCE` to a separately preregistered validation phase.
+
+Semantic-only output cannot create, close, or mutate a `SafetyFinding`. The calibration harness explicitly records:
 
 ```text
 semantic_fail_authority_granted: false
 statistical_validity_claimed: false
 ```
-
-A real semantic judge must be evaluated against blinded human/domain-expert labels before any decision to grant semantic-only FAIL authority.
 
 ## Current scope and claims boundary
 
@@ -166,6 +167,8 @@ V1.6 semantic fixture execution adds a separate:
 semantic_result.json
 ```
 
+Authority-relevant real-model semantic provenance includes the model/revision, serving-engine identity, generation configuration, and both effective prompt digests when available.
+
 Semantic output does not create a semantic-only `finding.json` while ADR-0015 remains unresolved.
 
 PO-9 automated clean-runner reproduction is implemented by:
@@ -215,10 +218,9 @@ For the frozen V1.5 base, read:
 For V1.6 semantic work, also read:
 
 12. [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md) — current semantic-judge scope, authority boundaries, adapter status, and calibration requirements.
-13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen transport, model-admission, serving-engine provenance, blinding, repetition, calibration, and ADR-0015 decision protocol.
-14. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
-
-ADR-0015 remains Proposed in the ADR registry; semantic-only FAIL propagation has not been accepted.
+13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen transport, model-admission, prompt provenance, blinding, repetition, calibration, and validation protocol.
+14. [`docs/adr/0015-semantic-fail-propagation-vs-review.md`](docs/adr/0015-semantic-fail-propagation-vs-review.md) — preregistered Proposed decision framework for semantic FAIL authority.
+15. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
 
 ## Relation to evaluation practice
 
@@ -247,8 +249,6 @@ V1.5 is **Done**. Full **Proven** status remains blocked only by the blind indep
 
 ### V1.6 development branch
 
-The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, calibration harness, and frozen initial evaluation plan are implemented.
-
-The initial empirical sequence is fixed as Qwen transport control first, Nemotron admission second, and real blinded calibration third. MedGemma is deferred to a separate healthcare-domain specialization extension. llama.cpp is the preferred independent GGUF serving cross-check; Ollama remains exploratory unless artifact provenance is reconciled.
+The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, and preregistered ADR-0015 decision framework are implemented.
 
 Real local/open-model execution is supported by the adapter but has **not yet been established as calibrated or validated**. No semantic-only FAIL or finding authority has been granted.
