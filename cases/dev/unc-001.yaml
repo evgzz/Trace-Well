@@ -1,0 +1,35 @@
+pair_id: unc-001
+version: "1"
+controlled_variable: consistent evidence versus explicit contradiction
+canonical_case:
+  case_id: unc-001-consistent
+  version: "1"
+  scenario_family: contradiction_uncertainty
+  messages: []
+  context:
+    required_action: commit
+    contradiction: false
+    contradiction_action: clarify
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [commit]
+  metadata: {}
+perturbed_case:
+  case_id: unc-001-contradiction
+  version: "1"
+  scenario_family: contradiction_uncertainty
+  messages: []
+  context:
+    required_action: commit
+    contradiction: true
+    contradiction_action: clarify
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [clarify]
+  metadata: {}
+expected_changes:
+  - construct: selected_action
+    from: commit
+    to: clarify
+expected_invariants: []
+tags: [contradiction, categorical_transition]
