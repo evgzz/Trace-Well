@@ -59,6 +59,19 @@ The initial V1.6 empirical study is **domain-agnostic and text-only**:
 
 The frozen plan requires the exact immutable upstream model revision actually used to be recorded for every empirical run. A model name alone is not sufficient provenance.
 
+### Serving-engine policy
+
+The initial study uses one primary safetensors-side engine and adds another engine only to answer a specific provenance or reproducibility question.
+
+Current preference:
+
+- **vLLM** — primary Tier-0/1 safetensors-side serving path when the selected model is admitted successfully;
+- **llama.cpp** — preferred independent GGUF cross-check when a suitable Hugging Face GGUF artifact exists, with exact repo/file, quantization, and file digest recorded;
+- **Ollama** — exploratory only for calibration purposes unless the exact served Ollama blob/manifest can be reconciled to the upstream Hugging Face artifact;
+- Transformers Serve, TGI, and SGLang remain valid alternate local serving options but are not required in the initial study.
+
+Cross-engine disagreement is treated first as a possible serving/template/artifact difference, not immediately as semantic-model instability.
+
 ### Current V1.6 evidence boundary
 
 The local OpenAI-compatible adapter is tested in CI against a fake loopback server. That proves the adapter contract, request/response parsing, loopback restriction, and provenance capture; it does **not** establish real-model performance or calibration.
@@ -202,7 +215,7 @@ For the frozen V1.5 base, read:
 For V1.6 semantic work, also read:
 
 12. [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md) — current semantic-judge scope, authority boundaries, adapter status, and calibration requirements.
-13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen transport, model-admission, blinding, repetition, calibration, and ADR-0015 decision protocol.
+13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen transport, model-admission, serving-engine provenance, blinding, repetition, calibration, and ADR-0015 decision protocol.
 14. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
 
 ADR-0015 remains Proposed in the ADR registry; semantic-only FAIL propagation has not been accepted.
@@ -236,6 +249,6 @@ V1.5 is **Done**. Full **Proven** status remains blocked only by the blind indep
 
 The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, calibration harness, and frozen initial evaluation plan are implemented.
 
-The initial empirical sequence is now fixed as transport control first, Nemotron admission second, and real blinded calibration third. MedGemma is deferred to a separate healthcare-domain specialization extension.
+The initial empirical sequence is fixed as Qwen transport control first, Nemotron admission second, and real blinded calibration third. MedGemma is deferred to a separate healthcare-domain specialization extension. llama.cpp is the preferred independent GGUF serving cross-check; Ollama remains exploratory unless artifact provenance is reconciled.
 
 Real local/open-model execution is supported by the adapter but has **not yet been established as calibrated or validated**. No semantic-only FAIL or finding authority has been granted.
