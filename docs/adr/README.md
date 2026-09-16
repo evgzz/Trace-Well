@@ -28,7 +28,7 @@ Not every historical/indexed decision has a standalone file in this repository s
 | 0012 | Public-repository neutrality: generic scanner + optional private augmentation | Accepted | AGENTS / LIMITATIONS |
 | 0013 | Apache-2.0 license | Accepted | LICENSE |
 | 0014 | Explicit deterministic reference-agent behavior taxonomy | Accepted | ARCHITECTURE / BENCHMARK_DESIGN |
-| 0015 | Semantic FAIL propagation versus REVIEW | Proposed | Future semantic phase |
+| 0015 | Semantic FAIL propagation versus REVIEW | Proposed | V1.6_EVALUATION_PLAN |
 | 0016 | Build/buy boundary and capability seams with external trace input | Accepted | ARCHITECTURE |
 | 0017 | Isolated semantic-judge execution contract | Proposed | Future semantic phase |
 | 0018 | CI and publication gating | Accepted | AGENTS / CI |
@@ -38,6 +38,7 @@ Not every historical/indexed decision has a standalone file in this repository s
 ## Full ADR files in this snapshot
 
 - `0014-deterministic-reference-agent-taxonomy.md`
+- `0015-semantic-fail-propagation-vs-review.md` — Proposed
 - `0016-build-buy-capability-seams.md`
 - `0017-semantic-judge-isolation.md` — Proposed
 - `0018-ci-publication-gating.md`
