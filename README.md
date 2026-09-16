@@ -46,7 +46,8 @@ Implemented on this branch:
 - verdict integration that preserves V1.5 precedence;
 - end-to-end semantic fixtures that persist `semantic_result.json` separately from deterministic evidence;
 - explicit deterministic-only `SafetyFinding` authority;
-- a localhost-only OpenAI-compatible adapter for a real local/open-model server, implemented without adding a model/provider SDK to the base runtime;
+- a localhost-only OpenAI-compatible adapter for self-hosted/local model servers;
+- a dedicated Hugging Face Inference Endpoints adapter for no-self-host Tier-0 testing;
 - a blinded calibration harness that joins judge records to independent human labels by opaque item ID and records agreement/disagreement evidence;
 - a standalone Proposed [`ADR-0015`](docs/adr/0015-semantic-fail-propagation-vs-review.md) that preregisters the evidence path for any future semantic-only FAIL decision;
 - a real-model execution runbook, strict experiment-manifest schema, and provenance recorder for the first empirical model run.
@@ -61,13 +62,25 @@ The initial V1.6 empirical study is **domain-agnostic and text-only**:
 
 The frozen plan requires the exact immutable upstream model revision actually used to be recorded for every empirical run. A model name alone is not sufficient provenance.
 
+### Tier-0 deployment options
+
+Tier 0 has two supported paths:
+
+- **HF Inference Endpoint** — preferred no-self-host path. Hugging Face manages the dedicated deployment while TRACE-Well calls the endpoint through `scripts/hf_endpoint_judge.py`.
+- **Local/self-hosted OpenAI-compatible server** — preferred when full prompt/runtime/artifact provenance is required; TRACE-Well calls it through `scripts/local_openai_compatible_judge.py`.
+
+Hosted dedicated-endpoint runs are `transport_only` by default. They become calibration candidates only if the deployment exposes enough exact model/template/runtime evidence to satisfy the frozen manifest and admission gates.
+
+Unavailable hosted provenance must remain unavailable. TRACE-Well must not substitute locally inferred template/rendered-prompt values and describe them as server-observed execution evidence.
+
 ### Serving-engine policy
 
-The initial study uses one primary safetensors-side engine and adds another engine only to answer a specific provenance or reproducibility question.
+The initial study adds serving paths only to answer a specific provenance or reproducibility question.
 
 Current preference:
 
-- **vLLM** — primary Tier-0/1 safetensors-side serving path when the selected model is admitted successfully;
+- **HF Inference Endpoints** — preferred no-ops Tier-0 transport path for the exact Hub model when deployable;
+- **vLLM** — primary local Tier-0/1 safetensors-side serving path when the selected model is admitted successfully;
 - **llama.cpp** — independent GGUF cross-check when a specific artifact/quantization question warrants it, with exact repo/file, quantization, and file digest recorded;
 - **Ollama** — exploratory only for calibration purposes unless the exact served Ollama blob/manifest can be reconciled to the upstream Hugging Face artifact;
 - Transformers Serve, TGI, and SGLang remain valid alternate local serving options but are not required in the initial study.
@@ -76,7 +89,7 @@ Cross-engine disagreement is treated first as a possible serving/template/artifa
 
 ### Current V1.6 evidence boundary
 
-The local OpenAI-compatible adapter is tested in CI against a fake loopback server. That proves the adapter contract, request/response parsing, loopback restriction, and provenance capture; it does **not** establish real-model performance or calibration.
+The local OpenAI-compatible adapter is tested in CI against a fake loopback server. The dedicated Hugging Face endpoint adapter is tested in CI against a fake HTTPS-equivalent endpoint contract. These prove adapter/request/response behavior; they do **not** establish real-model performance or calibration.
 
 The calibration harness exists, but no real-model calibration claim exists until actual judge outputs are compared against blinded human/domain-expert labels.
 
@@ -168,9 +181,9 @@ V1.6 semantic fixture execution adds a separate:
 semantic_result.json
 ```
 
-Authority-relevant real-model semantic provenance includes the model/revision, serving-engine identity, generation configuration, and both effective prompt digests when available.
+Authority-relevant real-model semantic provenance includes the model/revision, serving-engine identity, generation configuration, and both effective prompt digests.
 
-For the first real-model run, [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) defines the procedure and `experiments/v1.6/manifest.schema.json` defines the evidence manifest. `scripts/record_model_run.py` hashes the exact chat template, rendered prompt, request, and response files and writes the corresponding manifest.
+For the first real-model run, [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) defines both hosted and local Tier-0 procedures. `experiments/v1.6/manifest.schema.json` defines the calibration-grade evidence manifest, and `scripts/record_model_run.py` hashes the exact chat template, rendered prompt, request, and response files when those artifacts genuinely correspond to the execution under study.
 
 Semantic output does not create a semantic-only `finding.json` while ADR-0015 remains unresolved.
 
@@ -198,11 +211,12 @@ tracewell/semantic_pipeline.py
 tracewell/semantic_calibration.py
 scripts/mock_semantic_judge.py
 scripts/local_openai_compatible_judge.py
+scripts/hf_endpoint_judge.py
 scripts/record_model_run.py
 experiments/v1.6/manifest.schema.json
 ```
 
-The local OpenAI-compatible adapter accepts loopback-only endpoints. Determinism must be classified explicitly; the adapter does not infer reproducibility merely from `temperature=0` or the presence of a seed.
+The local adapter remains loopback-only. The dedicated HF endpoint adapter accepts an HTTPS managed endpoint and requires the canonical model id plus immutable model revision to be supplied explicitly.
 
 ## Canonical specification
 
@@ -223,8 +237,8 @@ For the frozen V1.5 base, read:
 For V1.6 semantic work, also read:
 
 12. [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md) — current semantic-judge scope, authority boundaries, adapter status, and calibration requirements.
-13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen transport, model-admission, prompt provenance, blinding, repetition, calibration, and validation protocol.
-14. [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) — procedural Tier-0 real-model execution and evidence-capture workflow.
+13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen hosted/local transport, model-admission, prompt provenance, blinding, repetition, calibration, and validation protocol.
+14. [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) — procedural hosted/local Tier-0 real-model execution and evidence-capture workflow.
 15. [`docs/adr/0015-semantic-fail-propagation-vs-review.md`](docs/adr/0015-semantic-fail-propagation-vs-review.md) — preregistered Proposed decision framework for semantic FAIL authority.
 16. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
 
@@ -255,6 +269,6 @@ V1.5 is **Done**. Full **Proven** status remains blocked only by the blind indep
 
 ### V1.6 development branch
 
-The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, preregistered ADR-0015 decision framework, and Tier-0 real-model execution tooling are implemented.
+The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, local and dedicated-HF endpoint adapters, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, preregistered ADR-0015 decision framework, and Tier-0 real-model execution tooling are implemented.
 
-Real local/open-model execution is now procedurally ready but has **not yet been executed or established as calibrated/validated**. No semantic-only FAIL or finding authority has been granted.
+A no-self-host Tier-0 Qwen run is now procedurally ready through Hugging Face Inference Endpoints, but no real hosted/local model execution has yet been completed or established as calibrated/validated. No semantic-only FAIL or finding authority has been granted.
