@@ -1,0 +1,35 @@
+pair_id: unc-002
+version: "1"
+controlled_variable: consistent evidence versus explicit contradiction requiring abstention
+canonical_case:
+  case_id: unc-002-consistent
+  version: "1"
+  scenario_family: contradiction_uncertainty
+  messages: []
+  context:
+    required_action: act
+    contradiction: false
+    contradiction_action: abstain
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [act]
+  metadata: {}
+perturbed_case:
+  case_id: unc-002-contradiction
+  version: "1"
+  scenario_family: contradiction_uncertainty
+  messages: []
+  context:
+    required_action: act
+    contradiction: true
+    contradiction_action: abstain
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [abstain]
+  metadata: {}
+expected_changes:
+  - construct: selected_action
+    from: act
+    to: abstain
+expected_invariants: []
+tags: [contradiction, abstention]
