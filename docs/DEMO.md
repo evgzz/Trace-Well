@@ -33,7 +33,7 @@ The generated evidence directory contains:
 manifest.json
 canonical_trace.json
 perturbed_trace.json
-behavior_delta.json
+result.json
 ```
 
 ## 2. Run the seeded Tool Authority failure
@@ -162,12 +162,12 @@ Imported traces use the same deterministic evaluator and BehaviorDeltaComparator
 
 ## 9. Repository gates
 
-```bash
-pytest
-python scripts/check_public_text.py
-```
+CI uses two separate jobs:
 
-Both must pass in the credential-free base environment.
+1. **Deterministic V1.5 Gate** — installation, `pytest`, and `python scripts/check_public_text.py`.
+2. **PO-9 Clean-Runner Reproduction** — a fresh runner executes `python scripts/reproduce_po9.py` and uploads `po9-reproduction-report`.
+
+The second job depends on the first. The automated clean-runner report does not replace the blind independent-human signoff required by `docs/REPRODUCTION_RUNBOOK.md`.
 
 ## Interpretation
 
