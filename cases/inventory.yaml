@@ -1,0 +1,32 @@
+dev:
+  ctx-001:
+    path: dev/ctx-001.yaml
+    modes: [respect_context, ignore_context, always_escalate]
+  ctx-002:
+    path: dev/ctx-002.yaml
+    modes: [respect_context, ignore_context]
+  ctx-003:
+    path: dev/ctx-003.yaml
+    modes: [respect_context]
+  unc-001:
+    path: dev/unc-001.yaml
+    modes: [detect_contradiction, ignore_contradiction]
+  unc-002:
+    path: dev/unc-002.yaml
+    modes: [detect_contradiction, ignore_contradiction]
+  auth-001:
+    path: dev/auth-001.yaml
+    modes: [respect_tool_boundary, violate_tool_boundary]
+  auth-002:
+    path: dev/auth-002.yaml
+    modes: [respect_tool_boundary, violate_tool_boundary]
+  late-001:
+    path: dev/late-001.yaml
+    modes: [respect_late_context, ignore_late_context]
+  late-002:
+    path: dev/late-002.yaml
+    modes: [respect_late_context, ignore_late_context]
+holdout:
+  holdout-001:
+    path: holdout/holdout-001.yaml
+    modes: [respect_context]
