@@ -24,7 +24,7 @@ app = typer.Typer(help="TRACE-Well deterministic evaluation harness.")
 @app.command()
 def version() -> None:
     """Print the package version."""
-    typer.echo("1.5.0")
+    typer.echo("1.6.0.dev0")
 
 
 @app.command("run-pair")
