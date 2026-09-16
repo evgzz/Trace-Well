@@ -48,7 +48,8 @@ Implemented on this branch:
 - explicit deterministic-only `SafetyFinding` authority;
 - a localhost-only OpenAI-compatible adapter for a real local/open-model server, implemented without adding a model/provider SDK to the base runtime;
 - a blinded calibration harness that joins judge records to independent human labels by opaque item ID and records agreement/disagreement evidence;
-- a standalone Proposed [`ADR-0015`](docs/adr/0015-semantic-fail-propagation-vs-review.md) that preregisters the evidence path for any future semantic-only FAIL decision.
+- a standalone Proposed [`ADR-0015`](docs/adr/0015-semantic-fail-propagation-vs-review.md) that preregisters the evidence path for any future semantic-only FAIL decision;
+- a real-model execution runbook, strict experiment-manifest schema, and provenance recorder for the first empirical model run.
 
 ### Frozen initial study roles
 
@@ -169,6 +170,8 @@ semantic_result.json
 
 Authority-relevant real-model semantic provenance includes the model/revision, serving-engine identity, generation configuration, and both effective prompt digests when available.
 
+For the first real-model run, [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) defines the procedure and `experiments/v1.6/manifest.schema.json` defines the evidence manifest. `scripts/record_model_run.py` hashes the exact chat template, rendered prompt, request, and response files and writes the corresponding manifest.
+
 Semantic output does not create a semantic-only `finding.json` while ADR-0015 remains unresolved.
 
 PO-9 automated clean-runner reproduction is implemented by:
@@ -195,6 +198,8 @@ tracewell/semantic_pipeline.py
 tracewell/semantic_calibration.py
 scripts/mock_semantic_judge.py
 scripts/local_openai_compatible_judge.py
+scripts/record_model_run.py
+experiments/v1.6/manifest.schema.json
 ```
 
 The local OpenAI-compatible adapter accepts loopback-only endpoints. Determinism must be classified explicitly; the adapter does not infer reproducibility merely from `temperature=0` or the presence of a seed.
@@ -219,8 +224,9 @@ For V1.6 semantic work, also read:
 
 12. [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md) — current semantic-judge scope, authority boundaries, adapter status, and calibration requirements.
 13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen transport, model-admission, prompt provenance, blinding, repetition, calibration, and validation protocol.
-14. [`docs/adr/0015-semantic-fail-propagation-vs-review.md`](docs/adr/0015-semantic-fail-propagation-vs-review.md) — preregistered Proposed decision framework for semantic FAIL authority.
-15. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
+14. [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) — procedural Tier-0 real-model execution and evidence-capture workflow.
+15. [`docs/adr/0015-semantic-fail-propagation-vs-review.md`](docs/adr/0015-semantic-fail-propagation-vs-review.md) — preregistered Proposed decision framework for semantic FAIL authority.
+16. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
 
 ## Relation to evaluation practice
 
@@ -249,6 +255,6 @@ V1.5 is **Done**. Full **Proven** status remains blocked only by the blind indep
 
 ### V1.6 development branch
 
-The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, and preregistered ADR-0015 decision framework are implemented.
+The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, localhost adapter contract, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, preregistered ADR-0015 decision framework, and Tier-0 real-model execution tooling are implemented.
 
-Real local/open-model execution is supported by the adapter but has **not yet been established as calibrated or validated**. No semantic-only FAIL or finding authority has been granted.
+Real local/open-model execution is now procedurally ready but has **not yet been executed or established as calibrated/validated**. No semantic-only FAIL or finding authority has been granted.
