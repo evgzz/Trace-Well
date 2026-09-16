@@ -4,7 +4,7 @@ TRACE-Well V1.5 is a small, reproducible, open-source paired/counterfactual beha
 
 Its deterministic MVP tests whether an agent makes a required behavioral change, preserves required invariants, and whether a configured mitigation survives both sides of the counterfactual using explicit, inspectable evidence.
 
-> **Branch notice:** this README is on `semantic-judge-v1.6`. The frozen V1.5 evidence anchor is commit `791c92c3da43e33a2e986e63f2f7ef9f845ac70b`; `main` and `freeze/v1.5.0-pending-po9` remain at that V1.5 freeze point. V1.6 work must not be used to retroactively expand V1.5 claims.
+> **Branch notice:** this README is on `semantic-judge-v1.6`. The frozen V1.5 evidence anchor is commit `791c92c3da43e33a2e986e63f2f7ef9f845ac70b`; `freeze/v1.5.0-pending-po9` remains the V1.5 freeze point. V1.6 work must not be used to retroactively expand V1.5 claims.
 
 ## V1.5 release status
 
@@ -18,7 +18,7 @@ Its deterministic MVP tests whether an agent makes a required behavioral change,
 
 ### What remains before V1.5 can be described as fully Proven
 
-One **eligible, previously unexposed human operator** must execute [`docs/REPRODUCTION_RUNBOOK.md`](docs/REPRODUCTION_RUNBOOK.md) from a clean checkout using only the public repository and ordinary public documentation for standard tools.
+One **eligible, previously unexposed human operator** must execute [`docs/REPRODUCTION_RUNBOOK.md`](docs/REPRODUCTION_RUNBOOK.md) against the frozen V1.5 snapshot using only the public repository and ordinary public documentation for standard tools.
 
 The operator must:
 
@@ -35,9 +35,9 @@ See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the authoritative V1.5 Proven
 
 ## V1.6 semantic-judge development status
 
-V1.6 is an additive semantic-evaluation extension built on top of the frozen V1.5 deterministic kernel. Its current scope is defined in [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md), and the first empirical study is frozen in [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md).
+V1.6 is an additive semantic-evaluation extension built on top of the frozen V1.5 deterministic kernel. Its current scope is defined in [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md), its implementation-vs-empirical status is defined in [`docs/V1.6_ACCEPTANCE.md`](docs/V1.6_ACCEPTANCE.md), and the first empirical study is frozen in [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md).
 
-Implemented on this branch:
+Implemented:
 
 - strict `JudgeRequest` / `JudgeResponse` JSON protocol;
 - isolated subprocess semantic-judge execution;
@@ -51,6 +51,8 @@ Implemented on this branch:
 - a blinded calibration harness that joins judge records to independent human labels by opaque item ID and records agreement/disagreement evidence;
 - a standalone Proposed [`ADR-0015`](docs/adr/0015-semantic-fail-propagation-vs-review.md) that preregisters the evidence path for any future semantic-only FAIL decision;
 - a real-model execution runbook, strict experiment-manifest schema, and provenance recorder for the first empirical model run.
+
+`docs/V1.6_ACCEPTANCE.md` marks the implementation gate complete while keeping real-model empirical validation explicitly pending.
 
 ### Frozen initial study roles
 
@@ -89,7 +91,7 @@ Cross-engine disagreement is treated first as a possible serving/template/artifa
 
 ### Current V1.6 evidence boundary
 
-The local OpenAI-compatible adapter is tested in CI against a fake loopback server. The dedicated Hugging Face endpoint adapter is tested in CI against a fake HTTPS-equivalent endpoint contract. These prove adapter/request/response behavior; they do **not** establish real-model performance or calibration.
+The local OpenAI-compatible adapter is tested in CI against a fake loopback server. The dedicated Hugging Face endpoint adapter is tested in CI against a fake endpoint contract. These prove adapter/request/response behavior; they do **not** establish real-model performance or calibration.
 
 The calibration harness exists, but no real-model calibration claim exists until actual judge outputs are compared against blinded human/domain-expert labels.
 
@@ -131,9 +133,9 @@ python -m pip install -e '.[dev]'
 
 Requires Python 3.11 or newer.
 
-The package and CLI version remain `1.5.0` on this development branch because the V1.6 semantic work has not been promoted into a V1.6 release package.
+The development package and CLI version are `1.6.0.dev0`. This marks integrated V1.6 implementation work; it is not a stable `1.6.0` release and does not imply empirical validation.
 
-## Implemented V1.5 CLI commands
+## Implemented deterministic CLI commands
 
 ```bash
 tracewell version
@@ -237,10 +239,11 @@ For the frozen V1.5 base, read:
 For V1.6 semantic work, also read:
 
 12. [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md) — current semantic-judge scope, authority boundaries, adapter status, and calibration requirements.
-13. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen hosted/local transport, model-admission, prompt provenance, blinding, repetition, calibration, and validation protocol.
-14. [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) — procedural hosted/local Tier-0 real-model execution and evidence-capture workflow.
-15. [`docs/adr/0015-semantic-fail-propagation-vs-review.md`](docs/adr/0015-semantic-fail-propagation-vs-review.md) — preregistered Proposed decision framework for semantic FAIL authority.
-16. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
+13. [`docs/V1.6_ACCEPTANCE.md`](docs/V1.6_ACCEPTANCE.md) — implementation-complete versus empirical-validation-pending status and merge interpretation.
+14. [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md) — frozen hosted/local transport, model-admission, prompt provenance, blinding, repetition, calibration, and validation protocol.
+15. [`docs/V1.6_REAL_MODEL_RUNBOOK.md`](docs/V1.6_REAL_MODEL_RUNBOOK.md) — procedural hosted/local Tier-0 real-model execution and evidence-capture workflow.
+16. [`docs/adr/0015-semantic-fail-propagation-vs-review.md`](docs/adr/0015-semantic-fail-propagation-vs-review.md) — preregistered Proposed decision framework for semantic FAIL authority.
+17. [`docs/adr/0017-semantic-judge-isolation.md`](docs/adr/0017-semantic-judge-isolation.md) — isolated semantic-judge execution contract.
 
 ## Relation to evaluation practice
 
@@ -255,7 +258,7 @@ Changes are gated by two separate CI jobs:
 1. **Deterministic V1.5 Gate** — fresh checkout, Python 3.11 setup, dependency installation, `pytest`, and `python scripts/check_public_text.py`.
 2. **PO-9 Clean-Runner Reproduction** — starts only after the deterministic gate succeeds, uses a separate fresh runner, executes `python scripts/reproduce_po9.py`, and uploads the `po9-reproduction-report` artifact.
 
-The V1.6 semantic tests run under the deterministic test gate, while the inherited PO-9 job confirms that V1.6 branch changes have not broken the frozen V1.5 reproduction mechanism.
+The V1.6 semantic tests run under the deterministic test gate, while the inherited PO-9 job confirms that V1.6 changes have not broken the frozen V1.5 reproduction mechanism.
 
 The clean-runner result does **not** substitute for the blind independent-human V1.5 signoff described above.
 
@@ -265,10 +268,10 @@ The clean-runner result does **not** substitute for the blind independent-human 
 
 The deterministic specification, execution path, benchmark corpus, evidence persistence, external-trace path, paired mitigation verification, CLI, automated proof coverage, and automated clean-runner reproduction are implemented and passing.
 
-V1.5 is **Done**. Full **Proven** status remains blocked only by the blind independent-human PO-9 reproduction and operator self-attestation.
+V1.5 is **Done**. Full **Proven** status remains blocked only by the blind independent-human PO-9 reproduction and operator self-attestation against the frozen V1.5 snapshot.
 
-### V1.6 development branch
+### V1.6 development
 
 The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, local and dedicated-HF endpoint adapters, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, preregistered ADR-0015 decision framework, and Tier-0 real-model execution tooling are implemented.
 
-A no-self-host Tier-0 Qwen run is now procedurally ready through Hugging Face Inference Endpoints, but no real hosted/local model execution has yet been completed or established as calibrated/validated. No semantic-only FAIL or finding authority has been granted.
+The implementation gate is complete. Empirical validation remains pending: no real hosted/local model execution has yet been completed or established as calibrated/validated. No semantic-only FAIL or finding authority has been granted.
