@@ -20,6 +20,8 @@ All notable changes to TRACE-Well are documented here.
 - 9 distinct development CasePairs and 1 separate holdout pair;
 - dedicated PO-7 inconsistent-specification fixture;
 - PO-1 through PO-11 acceptance matrix;
+- separate deterministic CI gate and PO-9 clean-runner reproduction job with uploaded report artifact;
+- blind independent-human PO-9 runbook with no-side-channel failure protocol and operator self-attestation requirement;
 - publication scanner and dependency-boundary CI controls;
 - Apache-2.0 license, contribution guide, security policy, demo, roadmap, and reproducibility documentation.
 
@@ -29,4 +31,4 @@ V1.5 supports prototype engineering evaluation evidence on controlled synthetic 
 
 ### Remaining release gate
 
-Independent-operator clean-clone reproduction signoff for PO-9 remains procedural and must be recorded separately from automated CI evidence.
+Full `Proven` status remains blocked only by PO-9 blind independent-human reproduction from public documentation alone, without author or informed-project-member clarification, plus the operator's own eligibility/no-side-channel self-attestation. Automated clean-runner reproduction is already passing and remains separate evidence.
