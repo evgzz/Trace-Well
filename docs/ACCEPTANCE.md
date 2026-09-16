@@ -9,7 +9,7 @@
 - **Procedural** — requires a documented human/operator procedure in addition to automated checks.
 - **Pending** — evidence has not yet been completed.
 
-A green CI run proves the automated checks and clean-runner procedure. It does not by itself establish that an independent human/operator reproduced the result without author knowledge.
+A green CI run proves the automated checks and clean-runner procedure. It does not by itself establish that an independent human/operator reproduced the result from public documentation alone without prior TRACE-Well design exposure, author clarification, or side-channel assistance.
 
 ## Proof obligations
 
@@ -23,7 +23,7 @@ A green CI run proves the automated checks and clean-runner procedure. It does n
 | PO-6 | Detect trajectory-dependent revision / failure-to-revise | `late-001` and `late-002` in `tests/test_suite.py` | Automated |
 | PO-7 | Reach terminal offline `REVIEW` for unreliable specification | `cases/fixtures/po7-spec-inconsistent.yaml`, `tests/test_po7_fixture.py` | Automated |
 | PO-8 | Verify mitigation across both conditions | `tests/test_lifecycle.py` | Automated |
-| PO-9 | Reproduce deterministic evidence without unstored author knowledge | canonicalization/manifest/rerun tests, `scripts/reproduce_po9.py`, clean-runner artifact, independent runbook | **Clean-runner reproduced; independent human/operator signoff pending** |
+| PO-9 | Reproduce deterministic evidence without unstored author knowledge | canonicalization/manifest/rerun tests, `scripts/reproduce_po9.py`, clean-runner artifact, independent runbook | **Clean-runner reproduced; blind independent human/operator signoff with operator self-attestation pending** |
 | PO-10 | Preserve evaluation semantics for conforming external traces and reject malformed traces | `tests/test_external.py`, `tests/test_cli.py` | Automated |
 | PO-11 | Public artifact controls work independently with scanner limitation explicit | `tests/test_dependency_boundary.py`, `scripts/check_public_text.py`, CI | Automated |
 
@@ -80,6 +80,39 @@ independent_human_operator_signoff: false
 
 This is stronger than unit-test-only evidence but intentionally does not impersonate independent-human reproduction.
 
+## Independent-human reproduction acceptance standard
+
+PO-9 human signoff is valid only when all of the following are true:
+
+```text
+[ ] operator is not the original author
+[ ] operator had no prior exposure to TRACE-Well design discussions, private planning, unpublished guidance, or author walkthroughs
+[ ] operator did not participate in developing, debugging, reviewing, or preparing V1.5 or the reproduction procedure
+[ ] operator starts from a clean checkout/environment
+[ ] operator receives only the public repository location and tracked public documentation
+[ ] no TRACE-Well-specific clarification is provided by the author or an informed project participant during the attempt
+[ ] operator independently reproduces PASS, FAIL, REVIEW, digest invariance, suite counts, and holdout behavior
+[ ] operator records the signoff fields required by `docs/REPRODUCTION_RUNBOOK.md`
+[ ] operator personally provides or affirmatively adopts the required first-person eligibility/no-side-channel self-attestation
+```
+
+General public documentation for standard tooling may be consulted. TRACE-Well-specific side-channel help is disqualifying for that attempt.
+
+The operator self-attestation is part of the evidence. The original author or a project maintainer must not assert operator eligibility on the operator's behalf.
+
+### Clarification / failure protocol
+
+If the operator cannot proceed from the public repository alone or requests TRACE-Well-specific clarification:
+
+1. stop the signoff attempt;
+2. record the blocking point as a documentation or repository-sufficiency defect;
+3. do not privately explain the missing information and continue the same attempt;
+4. fix the defect in tracked public material;
+5. rerun ordinary CI and automated clean-runner reproduction against the corrected commit;
+6. restart from a clean checkout, preferably with a fresh eligible operator.
+
+An attempt completed using docs-plus-side-channel clarification is **not** independent reproduction for PO-9.
+
 ## Done gate
 
 The repository engineering/release surface is **Done** when all of the following are true:
@@ -117,7 +150,8 @@ The repository is **Proven** only when:
 [x] PO-8 paired mitigation verification passes
 [x] PO-9 deterministic automated evidence passes
 [x] PO-9 automated clean-runner reproduction passes
-[ ] PO-9 independent-human/operator reproduction is signed off
+[ ] PO-9 eligible blind independent-human/operator reproduction is signed off from public documentation alone, without author clarification
+[ ] PO-9 operator-authored or operator-adopted eligibility/no-side-channel self-attestation is recorded with that signoff
 [x] PO-10 external trace equivalence/conformance passes
 [x] PO-11 publication controls pass
 ```
@@ -126,6 +160,14 @@ The repository is **Proven** only when:
 
 The repository is currently:
 
-> **Done, with automated and clean-runner proof coverage across PO-1–PO-11; full Proven status remains blocked only by PO-9 independent-human/operator signoff.**
+> **Done, with automated and clean-runner proof coverage across PO-1–PO-11; full Proven status remains blocked only by PO-9 blind independent-human/operator signoff plus the operator's own eligibility/no-side-channel attestation.**
 
 Do not collapse the clean-runner CI result into independent-human attestation.
+
+## Release wording after PO-9 signoff
+
+After a valid independent-human signoff and operator self-attestation have been recorded against the release commit, the release may state:
+
+> **TRACE-Well V1.5 demonstrates a reproducible paired/counterfactual behavioral evaluation mechanism on controlled synthetic cases, including required-change detection, invariant checks, explicit REVIEW behavior, paired mitigation verification, external-trace evaluation, and independent reproduction from public documentation alone without author clarification.**
+
+This wording remains subject to the claims ceiling and limitations in `docs/MVP_SCOPE.md` and `docs/LIMITATIONS.md`. It must not be used before both the PO-9 independent-human signoff and operator self-attestation conditions above are actually satisfied.
