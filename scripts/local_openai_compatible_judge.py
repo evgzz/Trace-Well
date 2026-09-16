@@ -53,6 +53,8 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--inference-engine", default="openai-compatible-local")
     value.add_argument("--inference-engine-version")
     value.add_argument("--quantization")
+    value.add_argument("--chat-template-digest")
+    value.add_argument("--rendered-prompt-digest")
     value.add_argument(
         "--decoding-determinism-class",
         required=True,
@@ -181,6 +183,8 @@ def _response(
         },
         judge_prompt_version=args.judge_prompt_version,
         rubric_version=args.rubric_version,
+        chat_template_digest=args.chat_template_digest,
+        rendered_prompt_digest=args.rendered_prompt_digest,
     )
     return JudgeResponse(
         request_id=judge_request.request_id,
