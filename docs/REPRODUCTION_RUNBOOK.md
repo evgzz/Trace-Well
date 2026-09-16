@@ -223,7 +223,7 @@ This report is machine-generated support for PO-9. It does **not** replace the i
 
 ## Signoff record
 
-The independent operator should record:
+The independent operator should complete and retain the following record in their own words:
 
 ```text
 Repository commit:
@@ -244,11 +244,19 @@ unexpected deviations:
 documentation defects encountered:
 ```
 
-Do not record private or sensitive personal information in the public repository unless intentionally approved for publication.
+The operator must also include the following **first-person self-attestation** (or substantively equivalent wording):
+
+> I attest that I performed this reproduction from a clean checkout using only the public TRACE-Well repository and ordinary public documentation for standard tools. Before this attempt, I had no prior exposure to TRACE-Well design discussions, private planning, unpublished guidance, implementation/review work, or preparation of this reproduction procedure. I did not receive TRACE-Well-specific clarification, walkthroughs, or side-channel assistance from the author or another informed project participant during the attempt. The results recorded above are my own observations from this execution.
+
+The self-attestation must be authored or affirmatively adopted by the operator. The original author or project maintainer must not attest to operator eligibility on the operator's behalf.
+
+If any attestation statement is false, uncertain, or requires qualification, record that qualification explicitly and treat the attempt as **not sufficient for blind PO-9 signoff** until the acceptance criteria are met.
+
+Do not record private or sensitive personal information in the public repository unless intentionally approved for publication. The attestation can use a role, initials, or other non-sensitive operator identifier if public disclosure of identity is unnecessary.
 
 ## PO-9 closure rule
 
-PO-9 independent reproduction is complete only when an **eligible independent operator with no prior TRACE-Well design exposure** executes this runbook from a clean checkout and records a successful result **using public repository documentation alone, without author or informed-project-member clarification**.
+PO-9 independent reproduction is complete only when an **eligible independent operator with no prior TRACE-Well design exposure** executes this runbook from a clean checkout, records a successful result **using public repository documentation alone, without author or informed-project-member clarification**, and personally provides the required eligibility/no-side-channel self-attestation.
 
 If clarification was required, that attempt is evidence of a documentation/repository-sufficiency defect and is not a valid signoff. Correct the public material and repeat the procedure under the failure protocol above.
 
