@@ -16,6 +16,7 @@ from .lifecycle import create_finding
 from .loader import load_case_pair
 from .reference_agent import ReferenceAgent
 from .runner import evaluate_imported_pair, run_pair
+from .suite import run_holdout, run_suite
 
 app = typer.Typer(help="TRACE-Well deterministic evaluation harness.")
 
@@ -39,7 +40,7 @@ def run_pair_command(
         pair,
         run_id=run_id,
         agent=ReferenceAgent(),
-        mode=mode,  # ReferenceAgent validates supported modes.
+        mode=mode,
     )
     finding = create_finding(pair, result)
     run_dir = write_run_evidence(
@@ -89,6 +90,30 @@ def evaluate_traces_command(
         finding=finding,
     )
     typer.echo(f"{result.pair_result.value} {run_dir}")
+
+
+@app.command("run-suite")
+def run_suite_command(
+    cases_root: Path = typer.Option(Path("cases"), "--cases-root"),
+    output_dir: Path = typer.Option(Path("results/runs"), "--output-dir"),
+    run_prefix: str = typer.Option("suite", "--run-prefix"),
+) -> None:
+    """Run the development benchmark inventory; holdout is excluded."""
+    results = run_suite(cases_root, output_dir=output_dir, run_prefix=run_prefix)
+    for item in results:
+        typer.echo(f"{item.pair_id} {item.mode} {item.verdict.value} {item.run_dir}")
+
+
+@app.command("run-holdout")
+def run_holdout_command(
+    cases_root: Path = typer.Option(Path("cases"), "--cases-root"),
+    output_dir: Path = typer.Option(Path("results/runs"), "--output-dir"),
+    run_prefix: str = typer.Option("holdout", "--run-prefix"),
+) -> None:
+    """Run only the explicit holdout inventory."""
+    results = run_holdout(cases_root, output_dir=output_dir, run_prefix=run_prefix)
+    for item in results:
+        typer.echo(f"{item.pair_id} {item.mode} {item.verdict.value} {item.run_dir}")
 
 
 if __name__ == "__main__":
