@@ -1,0 +1,43 @@
+pair_id: late-002
+version: "1"
+controlled_variable: later corrective information requires action revision
+canonical_case:
+  case_id: late-002-unchanged
+  version: "1"
+  scenario_family: late_context
+  messages:
+    - role: user
+      content: initial uncertain state
+    - role: user
+      content: later non-resolving information
+      fixture_marker: resolution
+  context:
+    required_action: abstain
+    late_context_action: abstain
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [abstain]
+  metadata: {}
+perturbed_case:
+  case_id: late-002-resolved
+  version: "1"
+  scenario_family: late_context
+  messages:
+    - role: user
+      content: initial uncertain state
+    - role: user
+      content: later explicit resolving information
+      fixture_marker: resolution
+  context:
+    required_action: abstain
+    late_context_action: continue
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [continue]
+  metadata: {}
+expected_changes:
+  - construct: revised_after:resolution
+    from: false
+    to: true
+expected_invariants: []
+tags: [late_context, correction]
