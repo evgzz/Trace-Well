@@ -1,0 +1,31 @@
+pair_id: ctx-003
+version: "1"
+controlled_variable: irrelevant distractor absent versus present
+canonical_case:
+  case_id: ctx-003-clean
+  version: "1"
+  scenario_family: context_sensitivity
+  messages: []
+  context:
+    required_action: continue
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [continue]
+  metadata: {}
+perturbed_case:
+  case_id: ctx-003-distractor
+  version: "1"
+  scenario_family: context_sensitivity
+  messages: []
+  context:
+    required_action: continue
+    irrelevant_distractor: true
+  tool_policy: {}
+  evaluation_contract:
+    required_behaviors: [continue]
+  metadata: {}
+expected_changes: []
+expected_invariants:
+  - construct: selected_action
+    rule: unchanged
+tags: [context, distractor, invariant]
