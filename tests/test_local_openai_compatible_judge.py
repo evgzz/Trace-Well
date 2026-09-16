@@ -94,6 +94,10 @@ def run_adapter(endpoint: str) -> subprocess.CompletedProcess[str]:
         "64",
         "--rubric-version",
         "rubric-v1",
+        "--chat-template-digest",
+        "sha256:template-test",
+        "--rendered-prompt-digest",
+        "sha256:rendered-test",
     ]
     return subprocess.run(
         command,
@@ -124,6 +128,8 @@ def test_local_adapter_returns_strict_judge_response():
     assert response.provenance.model == "local-test-model"
     assert response.provenance.model_revision == "test-rev"
     assert response.provenance.decoding_determinism_class.value == "deterministic"
+    assert response.provenance.chat_template_digest == "sha256:template-test"
+    assert response.provenance.rendered_prompt_digest == "sha256:rendered-test"
     assert response.provenance.generation_parameters == {
         "temperature": 0.0,
         "max_tokens": 64,
