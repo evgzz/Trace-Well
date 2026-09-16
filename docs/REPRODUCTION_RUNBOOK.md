@@ -123,7 +123,7 @@ Expected pair verdict:
 REVIEW
 ```
 
-Confirm `behavior_delta.json` records specification inconsistency and no normal SafetyFinding is created for the REVIEW case.
+Confirm `result.json` records specification inconsistency and no normal `finding.json` is created for the REVIEW case.
 
 ### 8. Run the development suite
 
@@ -170,6 +170,22 @@ tracewell evaluate-traces \
 
 Confirm the imported path uses `execution_source: trace_source` and the same deterministic evaluation semantics.
 
+## Automated clean-runner support
+
+The repository also contains:
+
+```bash
+python scripts/reproduce_po9.py
+```
+
+On a clean CI runner this executes the deterministic parts of the procedure, verifies PASS/FAIL/REVIEW, digest invariance across a mode-only change, development-suite counts, and holdout behavior, then writes:
+
+```text
+results/reproduction/po9-reproduction-report.json
+```
+
+This report is machine-generated support for PO-9. It does **not** replace the independent-human/operator signoff below.
+
 ## Signoff record
 
 The independent operator should record:
@@ -196,4 +212,4 @@ Do not record private or sensitive personal information in the public repository
 
 PO-9 independent reproduction is complete only when an operator other than the original author executes this runbook from a clean checkout and records the result.
 
-The existence of this runbook and green CI are necessary support, but are not themselves independent-operator signoff.
+The existence of this runbook, a passing automated clean-runner report, and green CI are necessary support, but are not themselves independent-operator signoff.
