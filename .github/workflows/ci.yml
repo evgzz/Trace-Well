@@ -28,3 +28,14 @@ jobs:
 
       - name: Scan public text
         run: python scripts/check_public_text.py
+
+      - name: Run PO-9 clean-runner reproduction
+        run: python scripts/reproduce_po9.py
+
+      - name: Upload PO-9 reproduction report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: po9-reproduction-report
+          path: results/reproduction/po9-reproduction-report.json
+          if-no-files-found: error
