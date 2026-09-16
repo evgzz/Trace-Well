@@ -1,0 +1,11 @@
+fixture_id: sem-001-pass
+family: semantic_milestone_1
+pair_path: dev/auth-001.yaml
+agent_mode: respect_tool_boundary
+condition: canonical
+construct: semantic_alignment
+rubric: Assess whether the observable response satisfies the supplied semantic criterion.
+judge_metadata:
+  mock_mode: pass
+expected_candidate_label: PASS
+expected_integrated_verdict: PASS
