@@ -1,10 +1,10 @@
 # TRACE-Well
 
-TRACE-Well V1.5 is a small, reproducible, open-source paired/counterfactual behavioral evaluation harness.
+TRACE-Well is an open-source paired/counterfactual behavioral evaluation harness. The frozen V1.5 deterministic evidence base remains intact, while `main` now contains integrated V1.6 semantic-judge development infrastructure.
 
-Its deterministic MVP tests whether an agent makes a required behavioral change, preserves required invariants, and whether a configured mitigation survives both sides of the counterfactual using explicit, inspectable evidence.
+The deterministic core tests whether an agent makes a required behavioral change, preserves required invariants, and whether a configured mitigation survives both sides of the counterfactual using explicit, inspectable evidence.
 
-> **Branch notice:** this README is on `semantic-judge-v1.6`. The frozen V1.5 evidence anchor is commit `791c92c3da43e33a2e986e63f2f7ef9f845ac70b`; `freeze/v1.5.0-pending-po9` remains the V1.5 freeze point. V1.6 work must not be used to retroactively expand V1.5 claims.
+> **Current status:** V1.6 implementation is integrated into `main` at development version `1.6.0.dev0`. Real-model empirical validation remains pending. The frozen V1.5 evidence anchor is commit `791c92c3da43e33a2e986e63f2f7ef9f845ac70b`; `freeze/v1.5.0-pending-po9` remains the V1.5 freeze point. V1.6 work must not be used to retroactively expand V1.5 claims.
 
 ## V1.5 release status
 
@@ -37,7 +37,7 @@ See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the authoritative V1.5 Proven
 
 V1.6 is an additive semantic-evaluation extension built on top of the frozen V1.5 deterministic kernel. Its current scope is defined in [`docs/V1.6_SCOPE.md`](docs/V1.6_SCOPE.md), its implementation-vs-empirical status is defined in [`docs/V1.6_ACCEPTANCE.md`](docs/V1.6_ACCEPTANCE.md), and the first empirical study is frozen in [`docs/V1.6_EVALUATION_PLAN.md`](docs/V1.6_EVALUATION_PLAN.md).
 
-Implemented:
+Implemented and integrated into `main`:
 
 - strict `JudgeRequest` / `JudgeResponse` JSON protocol;
 - isolated subprocess semantic-judge execution;
@@ -52,7 +52,7 @@ Implemented:
 - a standalone Proposed [`ADR-0015`](docs/adr/0015-semantic-fail-propagation-vs-review.md) that preregisters the evidence path for any future semantic-only FAIL decision;
 - a real-model execution runbook, strict experiment-manifest schema, and provenance recorder for the first empirical model run.
 
-`docs/V1.6_ACCEPTANCE.md` marks the implementation gate complete while keeping real-model empirical validation explicitly pending.
+`docs/V1.6_ACCEPTANCE.md` records the implementation gate as complete and integrated into `main`, while keeping real-model empirical validation explicitly pending.
 
 ### Frozen initial study roles
 
@@ -270,8 +270,8 @@ The deterministic specification, execution path, benchmark corpus, evidence pers
 
 V1.5 is **Done**. Full **Proven** status remains blocked only by the blind independent-human PO-9 reproduction and operator self-attestation against the frozen V1.5 snapshot.
 
-### V1.6 development
+### V1.6 integrated development
 
-The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, local and dedicated-HF endpoint adapters, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, preregistered ADR-0015 decision framework, and Tier-0 real-model execution tooling are implemented.
+The semantic protocol, isolated mock execution, observable-evidence boundary, conservative integration, semantic evidence persistence, deterministic-only finding authority, local and dedicated-HF endpoint adapters, calibration harness, frozen initial evaluation plan, prompt/template provenance fields, preregistered ADR-0015 decision framework, and Tier-0 real-model execution tooling are integrated into `main`.
 
 The implementation gate is complete. Empirical validation remains pending: no real hosted/local model execution has yet been completed or established as calibrated/validated. No semantic-only FAIL or finding authority has been granted.
