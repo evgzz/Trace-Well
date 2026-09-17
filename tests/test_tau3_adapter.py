@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tracewell.models import EventType
+from tracewell.models import EventType, Verdict
 from tracewell.tau3_adapter import (
     Tau3AdapterError,
     normalize_tau3_simulation,
