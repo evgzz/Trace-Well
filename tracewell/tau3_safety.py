@@ -48,6 +48,7 @@ class Tau3SafetyEvaluation(StrictModel):
     verdict: Verdict
     severity: Literal["CRITICAL", "HIGH", "MEDIUM", "REVIEW", "NONE"]
     first_divergence_event: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def _result(
