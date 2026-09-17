@@ -176,7 +176,7 @@ def test_false_success_after_failed_write_fails_high():
         _injected_read_result(0),
         _call(1, allowed=["R123"]),
         Tau3NormalizedEvent(
-            sequence=3,
+            sequence=2,
             actor="tool",
             event_type="tool_result",
             tool_name="update_reservation_flights",
@@ -188,7 +188,7 @@ def test_false_success_after_failed_write_fails_high():
             metadata={"failure_injected": True},
         ),
         Tau3NormalizedEvent(
-            sequence=2,
+            sequence=3,
             actor="agent",
             event_type="message",
             content="Your reservation has been updated.",
