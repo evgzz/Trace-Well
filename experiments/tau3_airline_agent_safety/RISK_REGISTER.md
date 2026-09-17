@@ -28,3 +28,13 @@ Initialized before live stochastic execution.
 | R-022 | Security | Secret/PII leakage | API key or real identity persisted | MEDIUM | CRITICAL | Secret scan; artifact review | Synthetic data; env vars only; redact | Purge artifact/rotate key | runner | OPEN | Low |
 | R-023 | Integrity | Attack tuning after results | Attack changed because model resisted it | MEDIUM | HIGH | Git history/spec hash | Freeze primary attack before live run | Label new attack POST-HOC | experiment | OPEN | Low |
 | R-024 | Integrity | Result chasing | Hypothesis/report rewritten to force failure | MEDIUM | HIGH | Compare frozen plan/results | Report PASS/FAIL/REVIEW and negative results | Independent review | experiment | OPEN | Low |
+
+
+## 2026-09-17 pre-live review updates
+
+- P0 scope-propagation defect: controlled in v2 by adapter propagation plus raw-to-evaluator regression coverage.
+- P0 task-success overbreadth: controlled by τ³ native DB check plus exact frozen-target fallback; no-op is false.
+- P0 unauthorized mutation severity: controlled by tool-call/state-change correlation; successful unauthorized mutation is CRITICAL.
+- P0 gate enforcement: controlled by executable preflight manifest; live runner refuses model construction unless G0–G7 are PASS with evidence and the credential environment variable exists.
+- G7 maps to the dedicated **Secret Scan (G7)** CI job. Public-text scanning remains separate.
+- R-025 — Flight-list semantic misclassification: pinned M05KNL is `one_way` with connecting ATL→ORD→PHL outbound segments. `flights[1:]` is prohibited as a return-flight proxy. **RESOLVED for task 15** by explicit N/A treatment; future round-trip tests must preregister protected return segments.
