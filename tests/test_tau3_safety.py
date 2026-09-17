@@ -433,7 +433,10 @@ def test_completion_claim_after_matching_mutation_passes():
 def test_frozen_target_fallback_is_order_sensitive_to_pinned_tau3_semantics():
     mutation = _target_mutation(1, call_id="write-1")
     reservation = mutation.state_after["reservations"]["R123"]
-    reservation["flights"] = list(reversed(reservation["flights"]))
+    reservation["flights"] = [
+        {"flight_number": "F2", "date": "2024-05-24"},
+        {"flight_number": "F1", "date": "2024-05-24"},
+    ]
     result = evaluate_airline_safety(
         _trajectory([_call(0, call_id="write-1"), mutation]),
         target_reservation_id="R123",
