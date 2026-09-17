@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from copy import deepcopy
@@ -20,6 +19,8 @@ from typing import Any
 
 
 TRACEWELL_BASELINE_SHA = "f8315b4b685d9722fe2d2126baeca1645ddfc400"
+PLAN_V2 = Path("experiments/tau3_airline_agent_safety/EXPERIMENT_PLAN_V2.md")
+RISK_REGISTER = Path("experiments/tau3_airline_agent_safety/RISK_REGISTER.md")
 TAU3_SHA = "b7ea9074c1cba482b30687fecdb5c8425fd6f619"
 TASK_ID = "15"
 TARGET_RESERVATION_ID = "M05KNL"
@@ -323,10 +324,18 @@ def _run_one(
         provenance=provenance,
     )
     trace = to_tracewell_trace(trajectory, case_id=f"tau3-airline-{variant}")
+    tau3_db_match = None
+    if (
+        getattr(simulation, "reward_info", None) is not None
+        and simulation.reward_info.db_check is not None
+    ):
+        tau3_db_match = bool(simulation.reward_info.db_check.db_match)
+
     evaluation = evaluate_airline_safety(
         trajectory,
         target_reservation_id=TARGET_RESERVATION_ID,
         retry_limit=1,
+        tau3_task_success=tau3_db_match,
     )
 
     run_dir = output_root / run_id
@@ -355,8 +364,7 @@ def _run_one(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tau-repo", type=Path, required=True)
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--model-revision", default=None)
+    parser.add_argument("--preflight-manifest", type=Path, required=True)
     parser.add_argument("--runs-per-variant", type=int, default=5)
     parser.add_argument(
         "--output-root",
@@ -373,24 +381,39 @@ def main() -> int:
         )
         return 2
 
-    plan = Path("experiments/tau3_airline_agent_safety/EXPERIMENT_PLAN.md")
-    risk = Path("experiments/tau3_airline_agent_safety/RISK_REGISTER.md")
-    if not plan.exists() or not risk.exists():
-        print("BLOCKED: experiment plan and risk register are required", file=sys.stderr)
+    from tracewell.tau3_preflight import (
+        Tau3PreflightError,
+        load_and_validate_preflight,
+    )
+
+    if not PLAN_V2.exists() or not RISK_REGISTER.exists():
+        print("BLOCKED: v2 experiment plan and risk register are required", file=sys.stderr)
         return 2
 
-    if not os.environ:
-        print("BLOCKED: environment unavailable", file=sys.stderr)
+    try:
+        preflight = load_and_validate_preflight(
+            args.preflight_manifest.resolve(),
+            experiment_plan_path=PLAN_V2,
+            risk_register_path=RISK_REGISTER,
+        )
+    except Tau3PreflightError as exc:
+        print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2
+
+    model = preflight["model"]
+    model_revision = preflight["model_revision"]
 
     args.output_root.mkdir(parents=True, exist_ok=True)
     manifest = {
-        "experiment_plan_sha256": _sha256(plan),
-        "risk_register_sha256": _sha256(risk),
+        "experiment_plan_sha256": _sha256(PLAN_V2),
+        "risk_register_sha256": _sha256(RISK_REGISTER),
+        "preflight_manifest_sha256": preflight["_preflight_sha256"],
+        "preflight_gates": preflight["gates"],
+        "provider": preflight["provider"],
         "tau3_commit": TAU3_SHA,
         "tracewell_baseline_commit": TRACEWELL_BASELINE_SHA,
-        "model": args.model,
-        "model_revision": args.model_revision,
+        "model": model,
+        "model_revision": model_revision,
         "runs_per_variant": args.runs_per_variant,
         "runs": [],
     }
@@ -402,11 +425,11 @@ def main() -> int:
             record = _run_one(
                 variant=variant,
                 run_number=run_number,
-                model=args.model,
+                model=model,
                 user_seed=seed,
                 output_root=args.output_root,
                 tau_repo=tau_repo,
-                model_revision=args.model_revision,
+                model_revision=model_revision,
             )
             manifest["runs"].append(record)
             _json_dump(args.output_root / "manifest.json", manifest)
