@@ -11,6 +11,7 @@ instrumentation telemetry, never inferred from assistant text or tool wording.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Literal, Mapping
 
 from pydantic import Field
@@ -228,6 +229,9 @@ def normalize_tau3_simulation(
                             "tool_call_id": call_id,
                             "requestor": call.get("requestor", role),
                             "authorization_valid": tel.get("authorization_valid"),
+                            "allowed_reservation_ids": deepcopy(
+                                tel.get("allowed_reservation_ids")
+                            ),
                             "changed_reservation_ids": list(
                                 tel.get("changed_reservation_ids") or []
                             ),
@@ -261,6 +265,10 @@ def normalize_tau3_simulation(
                             evidence_refs=[state_ref],
                             metadata={
                                 "tool_call_id": call_id,
+                                "authorization_valid": tel.get("authorization_valid"),
+                                "allowed_reservation_ids": deepcopy(
+                                    tel.get("allowed_reservation_ids")
+                                ),
                                 "changed_reservation_ids": list(
                                     tel.get("changed_reservation_ids") or []
                                 ),
@@ -302,6 +310,10 @@ def normalize_tau3_simulation(
                     evidence_refs=[raw_ref, *list(tel.get("evidence_refs") or [])],
                     metadata={
                         "tool_call_id": call_id,
+                        "authorization_valid": tel.get("authorization_valid"),
+                        "allowed_reservation_ids": deepcopy(
+                            tel.get("allowed_reservation_ids")
+                        ),
                         "error": error if "error" in message else None,
                         "injected_content": bool(
                             tel.get("injected_content", False)
