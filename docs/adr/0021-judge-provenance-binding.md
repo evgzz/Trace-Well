@@ -88,7 +88,7 @@ ExpectedJudgeConfiguration       how the judge ran
 
 | Expected field | Rule |
 |---|---|
-| `null` | unconstrained; never compared |
+| `null` (top-level expectation field) | unconstrained; never compared |
 | scalar (`str`, `int`) | exact equality with the returned value |
 | enum (`decoding_determinism_class`) | exact enum equality |
 | `generation_parameters` | subset: every expected key must be present in the returned parameters with an equal value; returned keys not in the expectation are unconstrained |
@@ -127,6 +127,26 @@ Values of different JSON types are never equal:
 
 The subset rule applies only at the top level of `generation_parameters`; nested objects and arrays inside a parameter value compare by the full typed equality above.
 
+#### Two meanings of `null`
+
+`null` means "unconstrained" **only** as the value of a top-level expectation field (for example `quantization: null` or `generation_parameters: null`). Inside `generation_parameters`, a key whose expected value is `null` constrains that key to the literal JSON `null`; the "don't care" meaning is never applied recursively:
+
+```text
+expected generation_parameters {"foo": null}
+returned {"foo": null}   -> MATCH
+returned {"foo": 0}      -> MISMATCH
+returned {}              -> MISMATCH   (expected key absent)
+```
+
+To leave a generation parameter unconstrained, omit its key from the expectation.
+
+#### Valid comparison inputs
+
+Only standard JSON values are valid comparison inputs. Numbers must be finite. `NaN`, `Infinity` and `-Infinity` are invalid protocol values, not values to compare, so there is no rule for whether `NaN` equals `NaN`:
+
+- **Expected side:** an `ExpectedJudgeIdentity` or `ExpectedJudgeConfiguration` containing a non-finite number fails validation when it is constructed and never reaches a comparison.
+- **Returned side:** judge output is parsed as strict JSON. A non-finite number anywhere in the response (Python's `json.loads` accepts these tokens by default) rejects the response as `JUDGE_MALFORMED_JSON` before schema validation, so no comparison runs and both check statuses are `NOT_EVALUATED` when an expectation was supplied.
+
 #### Evaluation and recording
 
 - Both comparisons run on any response that passes schema, request-ID and evidence-reference validation, so both outcomes are always known together.
@@ -153,7 +173,7 @@ A `null` expectation means "unconstrained", so `seed: null` cannot express "must
 
 ### Migration
 
-Moving two fields out of `ExpectedJudgeIdentity` is a breaking schema change for callers and for any persisted `expected_judge_identity` records that set them. V1.6 semantic outputs are prototype evidence and no live calibration records exist yet, so the change is made directly rather than with a compatibility shim. Implementation must land with tests covering every row of both comparison tables, the three cross-type inequalities above, both precedence cases (including that a dual mismatch records `MISMATCH` in both statuses and both field sets in details), and the subset rule's absent-key case.
+Moving two fields out of `ExpectedJudgeIdentity` is a breaking schema change for callers and for any persisted `expected_judge_identity` records that set them. V1.6 semantic outputs are prototype evidence and no live calibration records exist yet, so the change is made directly rather than with a compatibility shim. Implementation must land with tests covering every row of both comparison tables, the three cross-type inequalities above, the three `{"x": null}` cases above, rejection of `NaN`/`Infinity`/`-Infinity` on both the expected side (validation error) and the returned side (`JUDGE_MALFORMED_JSON`, never `MATCH` or `MISMATCH`), both precedence cases (including that a dual mismatch records `MISMATCH` in both statuses and both field sets in details), and the subset rule's absent-key case.
 
 ### Alternatives considered
 
