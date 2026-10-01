@@ -9,7 +9,11 @@ import yaml
 from pydantic import ValidationError
 
 from tracewell.models import EventType, Trace, Verdict
-from tracewell.semantic_judge import DecodingDeterminismClass, ExpectedJudgeIdentity
+from tracewell.semantic_judge import (
+    DecodingDeterminismClass,
+    ExpectedJudgeConfiguration,
+    ExpectedJudgeIdentity,
+)
 from tracewell.semantic_pipeline import (
     SEMANTIC_FINDING_AUTHORITY,
     SemanticEvaluationEvidence,
@@ -401,13 +405,11 @@ def test_judge_error_without_reason_code_is_schema_invalid(tmp_path: Path):
         SemanticEvaluationEvidence.model_validate({**payload, "judge_error_reason": "free text"})
 
 
-
 # --- expected-identity evidence ------------------------------------------------
 
 MOCK_EXPECTED = ExpectedJudgeIdentity(
     judge_id="tracewell.mock-semantic-judge",
     judge_version="1",
-    decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
     rubric_version="mock-rubric-v1",
 )
 
@@ -472,11 +474,160 @@ def test_identity_check_status_must_be_consistent(tmp_path: Path):
         expected_identity=MOCK_EXPECTED.model_copy(update={"judge_id": "other"}),
     )
     rejected_payload = rejected.model_dump(mode="json")
-    with pytest.raises(ValidationError, match="MISMATCH iff"):
+    with pytest.raises(ValidationError, match="identity: NOT_EVALUATED iff"):
         SemanticEvaluationEvidence.model_validate(
             {**rejected_payload, "judge_identity_check": "NOT_EVALUATED"}
+        )
+    with pytest.raises(ValidationError, match="identity: MISMATCH iff"):
+        SemanticEvaluationEvidence.model_validate(
+            {**rejected_payload, "judge_identity_check": "MATCH"}
         )
     with pytest.raises(ValidationError):
         SemanticEvaluationEvidence.model_validate(
             {**rejected_payload, "judge_identity_check": "SKIPPED"}
+        )
+
+
+
+# --- ADR-0021 Amendment 1: configuration binding, end to end ---------------------
+
+
+def _fixture_with_metadata(tmp_path: Path, name: str, **judge_metadata) -> Path:
+    payload = yaml.safe_load((SEMANTIC_CASES / "sem-001-pass.yaml").read_text(encoding="utf-8"))
+    payload["fixture_id"] = f"sem-test-{name}"
+    payload["judge_metadata"] = judge_metadata
+    path = tmp_path / f"{name}.yaml"
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    return path
+
+
+MOCK_CONFIGURATION = ExpectedJudgeConfiguration(
+    execution_mode="subprocess",
+    decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
+    generation_parameters={"temperature": 0.0},
+)
+
+
+def _int4_hot(tmp_path: Path, name: str) -> Path:
+    return _fixture_with_metadata(
+        tmp_path,
+        name,
+        mock_mode="pass",
+        mock_quantization="int4",
+        mock_generation_parameters={"temperature": 0.7},
+    )
+
+
+def test_configuration_check_not_requested_and_match(tmp_path: Path):
+    _, unchecked_dir = _run(tmp_path, "config-not-requested")
+    assert _persisted(unchecked_dir)["judge_configuration_check"] == "NOT_REQUESTED"
+    assert _persisted(unchecked_dir)["expected_judge_configuration"] is None
+
+    evidence, checked_dir = _run(
+        tmp_path,
+        "config-match",
+        fixture=_fixture_with_metadata(
+            tmp_path, "config-match", mock_mode="pass",
+            mock_generation_parameters={"temperature": 0.0, "max_tokens": 64},
+        ),
+        expected_identity=MOCK_EXPECTED,
+        expected_configuration=MOCK_CONFIGURATION,
+    )
+    persisted = _persisted(checked_dir)
+    assert evidence.judge_response is not None
+    assert persisted["judge_identity_check"] == "MATCH"
+    assert persisted["judge_configuration_check"] == "MATCH"
+    assert persisted["expected_judge_configuration"] == MOCK_CONFIGURATION.model_dump(mode="json")
+
+
+def test_configuration_only_mismatch_is_review_with_identity_match(tmp_path: Path):
+    evidence, run_dir = _run(
+        tmp_path,
+        "config-only-mismatch",
+        fixture=_int4_hot(tmp_path, "config-only-mismatch"),
+        expected_identity=MOCK_EXPECTED,
+        expected_configuration=ExpectedJudgeConfiguration(
+            quantization="fp16", generation_parameters={"temperature": 0.0}
+        ),
+    )
+    persisted = _assert_rejection(
+        evidence, run_dir, reason="JUDGE_CONFIGURATION_MISMATCH", has_rejected_response=True
+    )
+    assert persisted["judge_identity_check"] == "MATCH"
+    assert persisted["judge_configuration_check"] == "MISMATCH"
+    assert persisted["judge_error_details"] == {
+        "quantization": {"expected": "fp16", "observed": "int4"},
+        "generation_parameters": {
+            "expected": {"temperature": 0.0},
+            "observed": {"temperature": 0.7},
+        },
+    }
+
+
+def test_dual_mismatch_records_both_statuses_and_both_field_sets(tmp_path: Path):
+    evidence, run_dir = _run(
+        tmp_path,
+        "dual-mismatch",
+        fixture=_int4_hot(tmp_path, "dual-mismatch"),
+        expected_identity=MOCK_EXPECTED.model_copy(update={"judge_version": "2"}),
+        expected_configuration=ExpectedJudgeConfiguration(quantization="fp16"),
+    )
+    persisted = _assert_rejection(
+        evidence, run_dir, reason="JUDGE_IDENTITY_MISMATCH", has_rejected_response=True
+    )
+    # The reason is only the primary classification; both checks failed.
+    assert persisted["judge_identity_check"] == "MISMATCH"
+    assert persisted["judge_configuration_check"] == "MISMATCH"
+    assert set(persisted["judge_error_details"]) == {"judge_version", "quantization"}
+
+
+def test_identity_only_mismatch_reports_configuration_match(tmp_path: Path):
+    evidence, run_dir = _run(
+        tmp_path,
+        "identity-only-mismatch",
+        fixture=_fixture_with_metadata(
+            tmp_path, "identity-only-mismatch", mock_mode="pass",
+            mock_generation_parameters={"temperature": 0.0},
+        ),
+        expected_identity=MOCK_EXPECTED.model_copy(update={"judge_version": "2"}),
+        expected_configuration=MOCK_CONFIGURATION,
+    )
+    persisted = _assert_rejection(
+        evidence, run_dir, reason="JUDGE_IDENTITY_MISMATCH", has_rejected_response=True
+    )
+    assert persisted["judge_identity_check"] == "MISMATCH"
+    assert persisted["judge_configuration_check"] == "MATCH"
+
+
+def test_non_finite_returned_value_leaves_both_checks_not_evaluated(tmp_path: Path):
+    evidence, run_dir = _run(
+        tmp_path,
+        "nonfinite",
+        fixture=_fixture_with_metadata(tmp_path, "nonfinite", mock_mode="nonfinite"),
+        expected_identity=MOCK_EXPECTED,
+        expected_configuration=MOCK_CONFIGURATION,
+    )
+    persisted = _assert_rejection(
+        evidence, run_dir, reason="JUDGE_MALFORMED_JSON", has_rejected_response=False
+    )
+    assert persisted["judge_identity_check"] == "NOT_EVALUATED"
+    assert persisted["judge_configuration_check"] == "NOT_EVALUATED"
+
+
+def test_configuration_reason_cannot_hide_identity_mismatch(tmp_path: Path):
+    evidence, _ = _run(
+        tmp_path,
+        "reason-precedence",
+        fixture=_int4_hot(tmp_path, "reason-precedence"),
+        expected_identity=MOCK_EXPECTED.model_copy(update={"judge_version": "2"}),
+        expected_configuration=ExpectedJudgeConfiguration(quantization="fp16"),
+    )
+    payload = evidence.model_dump(mode="json")
+    with pytest.raises(ValidationError, match="identity is the primary reason"):
+        SemanticEvaluationEvidence.model_validate(
+            {**payload, "judge_error_reason": "JUDGE_CONFIGURATION_MISMATCH"}
+        )
+    with pytest.raises(ValidationError, match="configuration: MISMATCH iff"):
+        SemanticEvaluationEvidence.model_validate(
+            {**payload, "judge_configuration_check": "MATCH"}
         )

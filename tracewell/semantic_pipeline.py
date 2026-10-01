@@ -27,11 +27,15 @@ from .reference_agent import ReferenceAgent
 from .runner import run_pair
 from .semantic_judge import (
     DEFAULT_JUDGE_TIMEOUT_SECONDS,
+    CONFIGURATION_FIELDS,
+    IDENTITY_FIELDS,
+    ExpectedJudgeConfiguration,
     ExpectedJudgeIdentity,
     JudgeErrorReason,
     JudgeRequest,
     JudgeResponse,
     SemanticJudgeError,
+    SemanticJudgeProvenanceMismatch,
     integrate_semantic_candidate,
     run_semantic_judge,
 )
@@ -40,13 +44,21 @@ from .semantic_judge import (
 SEMANTIC_FINDING_AUTHORITY = "deterministic_only"
 
 
-class JudgeIdentityCheck(str, Enum):
-    """Whether returned judge provenance was compared to an expected identity."""
+class JudgeBindingCheck(str, Enum):
+    """Outcome of comparing returned provenance with one caller expectation."""
 
-    NOT_REQUESTED = "NOT_REQUESTED"  # caller supplied no expected identity
-    MATCH = "MATCH"  # compared; every configured field matched
+    NOT_REQUESTED = "NOT_REQUESTED"  # caller supplied no expectation
+    MATCH = "MATCH"  # compared; every constrained field matched
     MISMATCH = "MISMATCH"  # compared; at least one field differed
     NOT_EVALUATED = "NOT_EVALUATED"  # requested, but the judge failed before comparison
+
+
+PROVENANCE_MISMATCH_REASONS = frozenset(
+    {
+        JudgeErrorReason.JUDGE_IDENTITY_MISMATCH,
+        JudgeErrorReason.JUDGE_CONFIGURATION_MISMATCH,
+    }
+)
 
 
 class SemanticFixture(StrictModel):
@@ -83,7 +95,9 @@ class SemanticEvaluationEvidence(StrictModel):
     # inspection only; it never contributes a semantic candidate.
     rejected_judge_response: JudgeResponse | None = None
     expected_judge_identity: ExpectedJudgeIdentity | None = None
-    judge_identity_check: JudgeIdentityCheck
+    judge_identity_check: JudgeBindingCheck
+    expected_judge_configuration: ExpectedJudgeConfiguration | None = None
+    judge_configuration_check: JudgeBindingCheck
     integrated_verdict: Verdict
     semantic_finding_authority: Literal["deterministic_only"] = "deterministic_only"
     semantic_finding_created: Literal[False] = False
@@ -105,18 +119,45 @@ class SemanticEvaluationEvidence(StrictModel):
         return self
 
     @model_validator(mode="after")
-    def identity_check_is_consistent(self) -> "SemanticEvaluationEvidence":
-        check = self.judge_identity_check
-        requested = self.expected_judge_identity is not None
-        if (check == JudgeIdentityCheck.NOT_REQUESTED) == requested:
-            raise ValueError("NOT_REQUESTED iff no expected_judge_identity was supplied")
-        if check == JudgeIdentityCheck.MATCH and self.judge_response is None:
-            raise ValueError("identity MATCH requires an accepted judge response")
-        mismatch_reason = self.judge_error_reason == JudgeErrorReason.JUDGE_IDENTITY_MISMATCH
-        if (check == JudgeIdentityCheck.MISMATCH) != mismatch_reason:
-            raise ValueError("identity MISMATCH iff judge_error_reason is JUDGE_IDENTITY_MISMATCH")
-        if check == JudgeIdentityCheck.NOT_EVALUATED and self.judge_error_reason is None:
-            raise ValueError("identity NOT_EVALUATED requires a judge error before comparison")
+    def binding_checks_are_consistent(self) -> "SemanticEvaluationEvidence":
+        reason = self.judge_error_reason
+        compared = self.judge_response is not None or reason in PROVENANCE_MISMATCH_REASONS
+        details = self.judge_error_details or {}
+        for name, expected, check, fields in (
+            ("identity", self.expected_judge_identity, self.judge_identity_check, IDENTITY_FIELDS),
+            (
+                "configuration",
+                self.expected_judge_configuration,
+                self.judge_configuration_check,
+                CONFIGURATION_FIELDS,
+            ),
+        ):
+            if (check == JudgeBindingCheck.NOT_REQUESTED) != (expected is None):
+                raise ValueError(f"{name}: NOT_REQUESTED iff no expectation was supplied")
+            if expected is None:
+                continue
+            if compared == (check == JudgeBindingCheck.NOT_EVALUATED):
+                raise ValueError(
+                    f"{name}: NOT_EVALUATED iff the judge failed before comparison"
+                )
+            has_field_evidence = any(field in details for field in fields)
+            if compared and (check == JudgeBindingCheck.MISMATCH) != has_field_evidence:
+                raise ValueError(
+                    f"{name}: MISMATCH iff judge_error_details contains {name} fields"
+                )
+        identity_failed = self.judge_identity_check == JudgeBindingCheck.MISMATCH
+        configuration_failed = self.judge_configuration_check == JudgeBindingCheck.MISMATCH
+        if reason == JudgeErrorReason.JUDGE_IDENTITY_MISMATCH and not identity_failed:
+            raise ValueError("JUDGE_IDENTITY_MISMATCH requires identity check MISMATCH")
+        if reason == JudgeErrorReason.JUDGE_CONFIGURATION_MISMATCH and (
+            identity_failed or not configuration_failed
+        ):
+            raise ValueError(
+                "JUDGE_CONFIGURATION_MISMATCH requires configuration MISMATCH and "
+                "no identity MISMATCH (identity is the primary reason)"
+            )
+        if (identity_failed or configuration_failed) and reason not in PROVENANCE_MISMATCH_REASONS:
+            raise ValueError("a MISMATCH check requires a provenance-mismatch reason")
         return self
 
 
@@ -181,6 +222,7 @@ def run_semantic_fixture(
     judge_command: list[str],
     timeout_seconds: float = DEFAULT_JUDGE_TIMEOUT_SECONDS,
     expected_identity: ExpectedJudgeIdentity | None = None,
+    expected_configuration: ExpectedJudgeConfiguration | None = None,
 ) -> tuple[SemanticEvaluationEvidence, Path]:
     """Execute one semantic fixture and persist deterministic + semantic evidence.
 
@@ -224,19 +266,15 @@ def run_semantic_fixture(
             request,
             timeout_seconds=timeout_seconds,
             expected_identity=expected_identity,
+            expected_configuration=expected_configuration,
         )
     except SemanticJudgeError as exc:
         judge_error = exc
 
-    if expected_identity is None:
-        identity_check = JudgeIdentityCheck.NOT_REQUESTED
-    elif response is not None:
-        # run_semantic_judge only returns a response after the identity matched.
-        identity_check = JudgeIdentityCheck.MATCH
-    elif judge_error is not None and judge_error.reason == JudgeErrorReason.JUDGE_IDENTITY_MISMATCH:
-        identity_check = JudgeIdentityCheck.MISMATCH
-    else:
-        identity_check = JudgeIdentityCheck.NOT_EVALUATED
+    identity_check = _binding_check(expected_identity, response, judge_error, "identity")
+    configuration_check = _binding_check(
+        expected_configuration, response, judge_error, "configuration"
+    )
 
     integrated = integrate_semantic_candidate(
         deterministic_verdict=deterministic_result.pair_result,
@@ -270,11 +308,31 @@ def run_semantic_fixture(
         rejected_judge_response=judge_error.rejected_response if judge_error is not None else None,
         expected_judge_identity=expected_identity,
         judge_identity_check=identity_check,
+        expected_judge_configuration=expected_configuration,
+        judge_configuration_check=configuration_check,
         integrated_verdict=integrated,
     )
 
     _write_json(run_dir / "semantic_result.json", evidence)
     return evidence, run_dir
+
+
+def _binding_check(
+    expected: ExpectedJudgeIdentity | ExpectedJudgeConfiguration | None,
+    response: JudgeResponse | None,
+    judge_error: SemanticJudgeError | None,
+    name: str,
+) -> JudgeBindingCheck:
+    if expected is None:
+        return JudgeBindingCheck.NOT_REQUESTED
+    if response is not None:
+        # run_semantic_judge only returns a response after every comparison matched.
+        return JudgeBindingCheck.MATCH
+    if isinstance(judge_error, SemanticJudgeProvenanceMismatch):
+        # Both comparisons ran; report each independently of the primary reason.
+        failed = getattr(judge_error, f"{name}_mismatches")
+        return JudgeBindingCheck.MISMATCH if failed else JudgeBindingCheck.MATCH
+    return JudgeBindingCheck.NOT_EVALUATED
 
 
 def _write_json(path: Path, value: StrictModel) -> None:
