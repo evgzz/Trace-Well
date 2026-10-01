@@ -7,7 +7,7 @@ import sys
 import pytest
 
 from tracewell.models import EventType, Trace, Verdict
-from tracewell.semantic_judge import DecodingDeterminismClass
+from tracewell.semantic_judge import DecodingDeterminismClass, ExpectedJudgeIdentity
 from tracewell.semantic_pipeline import (
     SEMANTIC_FINDING_AUTHORITY,
     load_semantic_fixture,
@@ -127,3 +127,21 @@ def test_observable_evidence_excludes_event_metadata():
     assert rows[0]["event_id"] == "e1"
     assert rows[0]["output"] == {"action": "continue", "text": "observable"}
     assert "must-not-leak" not in json.dumps(rows)
+
+
+def test_judge_identity_mismatch_is_review_with_complete_evidence_package(tmp_path: Path):
+    evidence, run_dir = run_semantic_fixture(
+        SEMANTIC_CASES / "sem-001-pass.yaml",
+        cases_root=CASES,
+        output_dir=tmp_path / "runs",
+        run_id="semantic-identity-mismatch",
+        judge_command=judge_command(),
+        expected_identity=ExpectedJudgeIdentity(judge_id="tracewell.expected-judge"),
+    )
+
+    assert evidence.deterministic_pair_verdict == Verdict.PASS
+    assert evidence.judge_response is None
+    assert evidence.judge_error_type == "SemanticJudgeProvenanceMismatch"
+    assert "judge_id" in evidence.judge_error_message
+    assert evidence.integrated_verdict == Verdict.REVIEW
+    assert (run_dir / "semantic_result.json").is_file()

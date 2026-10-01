@@ -12,8 +12,10 @@ the existing TRACE-Well schema package.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
+from pathlib import Path
 import sys
 from typing import Any
 from urllib import error, parse, request
@@ -53,8 +55,16 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--inference-engine", default="openai-compatible-local")
     value.add_argument("--inference-engine-version")
     value.add_argument("--quantization")
-    value.add_argument("--chat-template-digest")
-    value.add_argument("--rendered-prompt-digest")
+    value.add_argument(
+        "--chat-template-file",
+        type=Path,
+        help="Exact chat template served by the endpoint; the adapter records its sha256.",
+    )
+    value.add_argument(
+        "--rendered-prompt-file",
+        type=Path,
+        help="Exact rendered prompt for this request; the adapter records its sha256.",
+    )
     value.add_argument(
         "--decoding-determinism-class",
         required=True,
@@ -89,6 +99,27 @@ def _require_loopback(endpoint: str) -> None:
         raise ValueError("endpoint must be loopback-only")
 
 
+def _sha256_bytes(data: bytes) -> str:
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def _sha256_file(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    return _sha256_bytes(path.read_bytes())
+
+
+class _RefuseRedirect(request.HTTPRedirectHandler):
+    """Never follow redirects: the request body (and any credential) must only
+    reach the endpoint that was explicitly configured and validated."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise error.HTTPError(req.full_url, code, f"refusing redirect to {newurl}", headers, fp)
+
+
+_OPENER = request.build_opener(_RefuseRedirect)
+
+
 def _read_request() -> JudgeRequest:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -120,8 +151,11 @@ def _model_payload(judge_request: JudgeRequest, args: argparse.Namespace) -> dic
     return payload
 
 
-def _post(endpoint: str, payload: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
-    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+def _encode(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _post(endpoint: str, encoded: bytes, timeout_seconds: float) -> dict[str, Any]:
     http_request = request.Request(
         endpoint,
         data=encoded,
@@ -129,7 +163,7 @@ def _post(endpoint: str, payload: dict[str, Any], timeout_seconds: float) -> dic
         method="POST",
     )
     try:
-        with request.urlopen(http_request, timeout=timeout_seconds) as response:
+        with _OPENER.open(http_request, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8")
     except (error.URLError, TimeoutError) as exc:
         raise RuntimeError(f"local judge HTTP request failed: {exc}") from exc
@@ -157,6 +191,8 @@ def _response(
     judge_request: JudgeRequest,
     model_output: dict[str, Any],
     args: argparse.Namespace,
+    *,
+    request_payload_digest: str,
 ) -> JudgeResponse:
     label = Verdict(model_output["candidate_label"])
     evidence_refs = model_output.get("evidence_refs", [])
@@ -183,8 +219,9 @@ def _response(
         },
         judge_prompt_version=args.judge_prompt_version,
         rubric_version=args.rubric_version,
-        chat_template_digest=args.chat_template_digest,
-        rendered_prompt_digest=args.rendered_prompt_digest,
+        chat_template_digest=_sha256_file(args.chat_template_file),
+        rendered_prompt_digest=_sha256_file(args.rendered_prompt_file),
+        request_payload_digest=request_payload_digest,
     )
     return JudgeResponse(
         request_id=judge_request.request_id,
@@ -202,13 +239,15 @@ def main() -> int:
     try:
         _require_loopback(args.endpoint)
         judge_request = _read_request()
-        http_response = _post(
-            args.endpoint,
-            _model_payload(judge_request, args),
-            args.http_timeout_seconds,
-        )
+        encoded = _encode(_model_payload(judge_request, args))
+        http_response = _post(args.endpoint, encoded, args.http_timeout_seconds)
         model_output = _extract_content(http_response)
-        semantic_response = _response(judge_request, model_output, args)
+        semantic_response = _response(
+            judge_request,
+            model_output,
+            args,
+            request_payload_digest=_sha256_bytes(encoded),
+        )
     except Exception as exc:  # subprocess boundary: failures surface as non-zero protocol errors
         print(f"local semantic judge adapter error: {exc}", file=sys.stderr)
         return 2

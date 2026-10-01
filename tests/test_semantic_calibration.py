@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from tracewell.models import Verdict
+from tracewell.semantic_judge import DecodingDeterminismClass
 from tracewell.semantic_calibration import (
     CalibrationLabel,
     JudgeCalibrationRecord,
@@ -117,3 +119,17 @@ def test_label_loaders_reject_duplicate_opaque_ids(tmp_path: Path):
     )
     with pytest.raises(ValueError, match="duplicate item IDs"):
         load_judge_records(judge_path)
+
+
+def test_calibration_record_determinism_class_is_typed_enum():
+    record = judge("item-a", Verdict.PASS)
+    assert record.decoding_determinism_class is DecodingDeterminismClass.DETERMINISTIC
+
+    with pytest.raises(ValidationError):
+        JudgeCalibrationRecord(
+            item_id="item-x",
+            judge_label=Verdict.PASS,
+            judge_id="j",
+            judge_version="1",
+            decoding_determinism_class="temperature_zero",
+        )

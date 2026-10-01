@@ -16,6 +16,12 @@ from pydantic import Field, ValidationError
 from .models import StrictModel, Verdict
 
 
+# Subprocess budget for one judge execution. It must exceed the HTTP timeouts
+# of the bundled adapters (local: 30s, hosted endpoint: 120s) plus interpreter
+# startup, so a slow-but-healthy hosted judge is not killed by the caller.
+DEFAULT_JUDGE_TIMEOUT_SECONDS = 150.0
+
+
 class DecodingDeterminismClass(str, Enum):
     DETERMINISTIC = "deterministic"
     SEEDED_STOCHASTIC = "seeded_stochastic"
@@ -40,6 +46,20 @@ class JudgeProvenance(StrictModel):
     rubric_version: str
     chat_template_digest: str | None = None
     rendered_prompt_digest: str | None = None
+    request_payload_digest: str | None = None
+
+
+class ExpectedJudgeIdentity(StrictModel):
+    """Judge identity the caller configured; each non-null field must match."""
+
+    judge_id: str | None = None
+    judge_version: str | None = None
+    model: str | None = None
+    model_revision: str | None = None
+    decoding_determinism_class: DecodingDeterminismClass | None = None
+    judge_prompt_version: str | None = None
+    rubric_version: str | None = None
+    chat_template_digest: str | None = None
 
 
 class JudgeRequest(StrictModel):
@@ -74,11 +94,49 @@ class SemanticJudgeProtocolError(SemanticJudgeError):
     pass
 
 
+class SemanticJudgeProvenanceMismatch(SemanticJudgeProtocolError):
+    """Returned provenance does not identify the judge the caller configured."""
+
+    reason = "JUDGE_IDENTITY_MISMATCH"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        response: JudgeResponse,
+        mismatches: dict[str, dict[str, Any]],
+    ) -> None:
+        super().__init__(message)
+        self.response = response
+        self.mismatches = mismatches
+
+
+def provenance_mismatches(
+    expected: ExpectedJudgeIdentity,
+    provenance: JudgeProvenance,
+) -> dict[str, dict[str, Any]]:
+    """Return {field: {expected, returned}} for every configured field that differs."""
+    mismatches: dict[str, dict[str, Any]] = {}
+    for field, expected_value in expected.model_dump(exclude_none=True).items():
+        returned_value = getattr(provenance, field)
+        if returned_value != expected_value:
+            mismatches[field] = {
+                "expected": _plain(expected_value),
+                "returned": _plain(returned_value),
+            }
+    return mismatches
+
+
+def _plain(value: Any) -> Any:
+    return value.value if isinstance(value, Enum) else value
+
+
 def run_semantic_judge(
     command: list[str],
     request: JudgeRequest,
     *,
-    timeout_seconds: float = 5.0,
+    timeout_seconds: float = DEFAULT_JUDGE_TIMEOUT_SECONDS,
+    expected_identity: ExpectedJudgeIdentity | None = None,
 ) -> JudgeResponse:
     """Execute one semantic judge request through a strict subprocess boundary."""
     payload = request.model_dump(mode="json")
@@ -115,6 +173,15 @@ def run_semantic_judge(
 
     if response.request_id != request.request_id:
         raise SemanticJudgeProtocolError("semantic judge response request_id mismatch")
+
+    if expected_identity is not None:
+        mismatches = provenance_mismatches(expected_identity, response.provenance)
+        if mismatches:
+            raise SemanticJudgeProvenanceMismatch(
+                f"semantic judge provenance does not match expected identity: {sorted(mismatches)}",
+                response=response,
+                mismatches=mismatches,
+            )
 
     return response
 
