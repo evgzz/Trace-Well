@@ -399,3 +399,84 @@ def test_judge_error_without_reason_code_is_schema_invalid(tmp_path: Path):
         SemanticEvaluationEvidence.model_validate({**payload, "judge_error_reason": None})
     with pytest.raises(ValidationError):
         SemanticEvaluationEvidence.model_validate({**payload, "judge_error_reason": "free text"})
+
+
+
+# --- expected-identity evidence ------------------------------------------------
+
+MOCK_EXPECTED = ExpectedJudgeIdentity(
+    judge_id="tracewell.mock-semantic-judge",
+    judge_version="1",
+    decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
+    rubric_version="mock-rubric-v1",
+)
+
+
+def test_identity_check_not_requested_is_distinguishable_from_match(tmp_path: Path):
+    unchecked, unchecked_dir = _run(tmp_path, "identity-not-requested")
+    checked, checked_dir = _run(tmp_path, "identity-match", expected_identity=MOCK_EXPECTED)
+
+    # Same accepted response either way...
+    assert unchecked.judge_response is not None and checked.judge_response is not None
+    # ...but the audit record shows whether the comparison was enforced.
+    assert _persisted(unchecked_dir)["judge_identity_check"] == "NOT_REQUESTED"
+    assert _persisted(unchecked_dir)["expected_judge_identity"] is None
+    assert _persisted(checked_dir)["judge_identity_check"] == "MATCH"
+    assert _persisted(checked_dir)["expected_judge_identity"] == MOCK_EXPECTED.model_dump(mode="json")
+
+
+def test_identity_mismatch_persists_expected_identity_and_status(tmp_path: Path):
+    expected = MOCK_EXPECTED.model_copy(update={"model_revision": "pinned-rev"})
+    evidence, run_dir = _run(tmp_path, "identity-mismatch-status", expected_identity=expected)
+    persisted = _assert_rejection(
+        evidence, run_dir, reason="JUDGE_IDENTITY_MISMATCH", has_rejected_response=True
+    )
+
+    assert persisted["judge_identity_check"] == "MISMATCH"
+    assert persisted["expected_judge_identity"]["model_revision"] == "pinned-rev"
+    assert persisted["judge_error_details"] == {
+        "model_revision": {"expected": "pinned-rev", "observed": None}
+    }
+
+
+@pytest.mark.parametrize("mock_mode", ["nonzero", "fabricated_ref"])
+def test_identity_not_evaluated_when_judge_fails_before_comparison(tmp_path: Path, mock_mode):
+    evidence, run_dir = _run(
+        tmp_path,
+        f"identity-not-evaluated-{mock_mode}",
+        fixture=_fixture_with_mock_mode(tmp_path, mock_mode),
+        expected_identity=MOCK_EXPECTED,
+    )
+
+    persisted = _persisted(run_dir)
+    assert persisted["judge_identity_check"] == "NOT_EVALUATED"
+    assert persisted["expected_judge_identity"] is not None
+    assert persisted["judge_error_reason"] != "JUDGE_IDENTITY_MISMATCH"
+    assert evidence.integrated_verdict == Verdict.REVIEW
+
+
+def test_identity_check_status_must_be_consistent(tmp_path: Path):
+    accepted, _ = _run(tmp_path, "identity-consistency-accepted")
+    payload = accepted.model_dump(mode="json")
+
+    with pytest.raises(ValidationError, match="NOT_REQUESTED iff"):
+        SemanticEvaluationEvidence.model_validate({**payload, "judge_identity_check": "MATCH"})
+    with pytest.raises(ValidationError, match="NOT_REQUESTED iff"):
+        SemanticEvaluationEvidence.model_validate(
+            {**payload, "expected_judge_identity": MOCK_EXPECTED.model_dump(mode="json")}
+        )
+
+    rejected, _ = _run(
+        tmp_path,
+        "identity-consistency-rejected",
+        expected_identity=MOCK_EXPECTED.model_copy(update={"judge_id": "other"}),
+    )
+    rejected_payload = rejected.model_dump(mode="json")
+    with pytest.raises(ValidationError, match="MISMATCH iff"):
+        SemanticEvaluationEvidence.model_validate(
+            {**rejected_payload, "judge_identity_check": "NOT_EVALUATED"}
+        )
+    with pytest.raises(ValidationError):
+        SemanticEvaluationEvidence.model_validate(
+            {**rejected_payload, "judge_identity_check": "SKIPPED"}
+        )

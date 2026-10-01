@@ -11,6 +11,7 @@ Proposed.
 
 from __future__ import annotations
 
+from enum import Enum
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -37,6 +38,15 @@ from .semantic_judge import (
 
 
 SEMANTIC_FINDING_AUTHORITY = "deterministic_only"
+
+
+class JudgeIdentityCheck(str, Enum):
+    """Whether returned judge provenance was compared to an expected identity."""
+
+    NOT_REQUESTED = "NOT_REQUESTED"  # caller supplied no expected identity
+    MATCH = "MATCH"  # compared; every configured field matched
+    MISMATCH = "MISMATCH"  # compared; at least one field differed
+    NOT_EVALUATED = "NOT_EVALUATED"  # requested, but the judge failed before comparison
 
 
 class SemanticFixture(StrictModel):
@@ -72,6 +82,8 @@ class SemanticEvaluationEvidence(StrictModel):
     # fabricated evidence references or an identity mismatch). Persisted for
     # inspection only; it never contributes a semantic candidate.
     rejected_judge_response: JudgeResponse | None = None
+    expected_judge_identity: ExpectedJudgeIdentity | None = None
+    judge_identity_check: JudgeIdentityCheck
     integrated_verdict: Verdict
     semantic_finding_authority: Literal["deterministic_only"] = "deterministic_only"
     semantic_finding_created: Literal[False] = False
@@ -90,6 +102,21 @@ class SemanticEvaluationEvidence(StrictModel):
             raise ValueError("every judge error requires a judge_error_reason code")
         if self.judge_error_details is not None and self.judge_error_type is None:
             raise ValueError("judge_error_details requires judge_error_type")
+        return self
+
+    @model_validator(mode="after")
+    def identity_check_is_consistent(self) -> "SemanticEvaluationEvidence":
+        check = self.judge_identity_check
+        requested = self.expected_judge_identity is not None
+        if (check == JudgeIdentityCheck.NOT_REQUESTED) == requested:
+            raise ValueError("NOT_REQUESTED iff no expected_judge_identity was supplied")
+        if check == JudgeIdentityCheck.MATCH and self.judge_response is None:
+            raise ValueError("identity MATCH requires an accepted judge response")
+        mismatch_reason = self.judge_error_reason == JudgeErrorReason.JUDGE_IDENTITY_MISMATCH
+        if (check == JudgeIdentityCheck.MISMATCH) != mismatch_reason:
+            raise ValueError("identity MISMATCH iff judge_error_reason is JUDGE_IDENTITY_MISMATCH")
+        if check == JudgeIdentityCheck.NOT_EVALUATED and self.judge_error_reason is None:
+            raise ValueError("identity NOT_EVALUATED requires a judge error before comparison")
         return self
 
 
@@ -201,6 +228,16 @@ def run_semantic_fixture(
     except SemanticJudgeError as exc:
         judge_error = exc
 
+    if expected_identity is None:
+        identity_check = JudgeIdentityCheck.NOT_REQUESTED
+    elif response is not None:
+        # run_semantic_judge only returns a response after the identity matched.
+        identity_check = JudgeIdentityCheck.MATCH
+    elif judge_error is not None and judge_error.reason == JudgeErrorReason.JUDGE_IDENTITY_MISMATCH:
+        identity_check = JudgeIdentityCheck.MISMATCH
+    else:
+        identity_check = JudgeIdentityCheck.NOT_EVALUATED
+
     integrated = integrate_semantic_candidate(
         deterministic_verdict=deterministic_result.pair_result,
         specification_inconsistency=spec_inconsistency,
@@ -231,6 +268,8 @@ def run_semantic_fixture(
         judge_error_reason=judge_error.reason if judge_error is not None else None,
         judge_error_details=judge_error.details if judge_error is not None else None,
         rejected_judge_response=judge_error.rejected_response if judge_error is not None else None,
+        expected_judge_identity=expected_identity,
+        judge_identity_check=identity_check,
         integrated_verdict=integrated,
     )
 

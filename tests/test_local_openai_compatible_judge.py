@@ -234,3 +234,54 @@ def test_local_adapter_refuses_redirects():
     assert Target.hits == 0
     assert proc.returncode != 0
     assert "refusing redirect" in proc.stderr
+
+
+def test_declared_file_digests_are_frozen_before_inference(tmp_path: Path):
+    template = tmp_path / "chat_template.jinja"
+    template.write_bytes(b"template-at-request-start")
+    rendered = tmp_path / "rendered_prompt.txt"
+    rendered.write_bytes(b"rendered-at-request-start")
+
+    class MutatingHandler(Handler):
+        def do_POST(self):  # noqa: N802
+            # Files change while the model is "running".
+            template.write_bytes(b"template-changed-mid-request")
+            rendered.write_bytes(b"rendered-changed-mid-request")
+            super().do_POST()
+
+    server, thread, port = serve(MutatingHandler)
+    try:
+        proc = run_adapter(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            chat_template=template,
+            rendered_prompt=rendered,
+        )
+    finally:
+        stop(server, thread)
+
+    assert proc.returncode == 0, proc.stderr
+    assert template.read_bytes() == b"template-changed-mid-request"
+    response = JudgeResponse.model_validate_json(proc.stdout)
+    assert response.provenance.chat_template_digest == sha256(b"template-at-request-start")
+    assert response.provenance.rendered_prompt_digest == sha256(b"rendered-at-request-start")
+
+
+def test_missing_declared_file_fails_before_any_request(tmp_path: Path):
+    class Counting(Handler):
+        hits = 0
+
+        def do_POST(self):  # noqa: N802
+            type(self).hits += 1
+            super().do_POST()
+
+    server, thread, port = serve(Counting)
+    try:
+        proc = run_adapter(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            chat_template=tmp_path / "missing-template.jinja",
+        )
+    finally:
+        stop(server, thread)
+
+    assert proc.returncode != 0
+    assert Counting.hits == 0
