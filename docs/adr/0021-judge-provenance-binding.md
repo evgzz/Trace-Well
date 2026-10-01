@@ -22,7 +22,7 @@ ADR-0017 defines which provenance fields a `JudgeResponse` carries. It does not 
 | `chat_template_digest` | `--chat-template-file` | adapter, when the file is supplied |
 | `rendered_prompt_digest` | `--rendered-prompt-file` | adapter, when the file is supplied |
 
-All use the form `sha256:<hex>`, matching `scripts/record_model_run.py`. The asserted-string flags `--chat-template-digest` and `--rendered-prompt-digest` are removed.
+Declared-file digests are computed before the inference request is sent, so a file changed during a long request cannot be recorded as the artifact that was used. All use the form `sha256:<hex>`, matching `scripts/record_model_run.py`. The asserted-string flags `--chat-template-digest` and `--rendered-prompt-digest` are removed.
 
 `request_payload_digest` is deliberately distinct from `rendered_prompt_digest`. The adapter sends chat messages; the server applies the chat template. Per `docs/V1.6_EVALUATION_PLAN.md`, `rendered_prompt_digest` identifies the server-rendered prompt, which the adapter cannot observe. Labelling the sent payload as the rendered prompt would be incorrect provenance. When the rendered prompt or template is unavailable, the field is null, not guessed.
 
@@ -31,6 +31,8 @@ All use the form `sha256:<hex>`, matching `scripts/record_model_run.py`. The ass
 A caller may supply `ExpectedJudgeIdentity` (`judge_id`, `judge_version`, `model`, `model_revision`, `decoding_determinism_class`, `judge_prompt_version`, `rubric_version`, `chat_template_digest`). Every non-null field must equal the returned provenance. Any mismatch raises `SemanticJudgeProvenanceMismatch` (a `SemanticJudgeProtocolError`, reason `JUDGE_IDENTITY_MISMATCH`) and integrates as `REVIEW`.
 
 Expected identity is run configuration, not fixture content, so it is passed to `run_semantic_fixture` rather than stored in semantic fixtures. Omitting it preserves current behavior.
+
+The supplied expected identity and the outcome of the comparison (`NOT_REQUESTED`, `MATCH`, `MISMATCH`, `NOT_EVALUATED`) are persisted with every semantic result, so the evidence shows whether binding was enforced and not only what the judge reported. A mismatching response is preserved as `rejected_judge_response` with `{field: {expected, observed}}` details.
 
 ### Determinism class is typed everywhere
 

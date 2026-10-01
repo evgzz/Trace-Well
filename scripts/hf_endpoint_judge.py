@@ -193,6 +193,8 @@ def _response(
     args: argparse.Namespace,
     *,
     request_payload_digest: str,
+    chat_template_digest: str | None,
+    rendered_prompt_digest: str | None,
 ) -> JudgeResponse:
     evidence_refs = model_output.get("evidence_refs", [])
     if not isinstance(evidence_refs, list) or not all(isinstance(item, str) for item in evidence_refs):
@@ -222,8 +224,8 @@ def _response(
             },
             judge_prompt_version=args.judge_prompt_version,
             rubric_version=args.rubric_version,
-            chat_template_digest=_sha256_file(args.chat_template_file),
-            rendered_prompt_digest=_sha256_file(args.rendered_prompt_file),
+            chat_template_digest=chat_template_digest,
+            rendered_prompt_digest=rendered_prompt_digest,
             request_payload_digest=request_payload_digest,
         ),
         metadata={
@@ -240,6 +242,10 @@ def main() -> int:
         if not token:
             raise ValueError(f"missing Hugging Face token in environment variable {args.token_env}")
         judge_request = _read_request()
+        # Freeze declared-file digests before inference so a file changed during
+        # a long request cannot be recorded as the artifact that was used.
+        chat_template_digest = _sha256_file(args.chat_template_file)
+        rendered_prompt_digest = _sha256_file(args.rendered_prompt_file)
         encoded = _encode(_model_payload(judge_request, args))
         raw_response = _post(
             _chat_url(args.base_url, allow_http=args.allow_http_endpoint),
@@ -252,6 +258,8 @@ def main() -> int:
             _extract_content(raw_response),
             args,
             request_payload_digest=_sha256_bytes(encoded),
+            chat_template_digest=chat_template_digest,
+            rendered_prompt_digest=rendered_prompt_digest,
         )
     except Exception as exc:
         print(f"HF dedicated endpoint judge error: {exc}", file=sys.stderr)
