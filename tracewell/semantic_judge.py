@@ -8,17 +8,15 @@ from __future__ import annotations
 
 from enum import Enum
 import json
+import math
 import subprocess
 from typing import Any
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 
 from .models import StrictModel, Verdict
 
 
-# Subprocess budget for one judge execution. It must exceed the HTTP timeouts
-# of the bundled adapters (local: 30s, hosted endpoint: 120s) plus interpreter
-# startup, so a slow-but-healthy hosted judge is not killed by the caller.
 DEFAULT_JUDGE_TIMEOUT_SECONDS = 150.0
 
 
@@ -50,16 +48,34 @@ class JudgeProvenance(StrictModel):
 
 
 class ExpectedJudgeIdentity(StrictModel):
-    """Judge identity the caller configured; each non-null field must match."""
+    """What judge artifact the caller expects to run."""
 
     judge_id: str | None = None
     judge_version: str | None = None
     model: str | None = None
     model_revision: str | None = None
-    decoding_determinism_class: DecodingDeterminismClass | None = None
+    weights_digest: str | None = None
     judge_prompt_version: str | None = None
     rubric_version: str | None = None
+
+
+class ExpectedJudgeConfiguration(StrictModel):
+    """How the caller expects the judge to run."""
+
+    execution_mode: str | None = None
+    inference_engine: str | None = None
+    inference_engine_version: str | None = None
+    quantization: str | None = None
+    decoding_determinism_class: DecodingDeterminismClass | None = None
+    seed: int | None = None
+    generation_parameters: dict[str, Any] | None = None
     chat_template_digest: str | None = None
+
+    @model_validator(mode="after")
+    def generation_parameters_are_standard_json(self) -> "ExpectedJudgeConfiguration":
+        if self.generation_parameters is not None:
+            _validate_standard_json(self.generation_parameters, path="generation_parameters")
+        return self
 
 
 class JudgeRequest(StrictModel):
@@ -83,8 +99,6 @@ class JudgeResponse(StrictModel):
 
 
 class JudgeErrorReason(str, Enum):
-    """Stable machine-readable codes for every semantic-judge rejection."""
-
     JUDGE_TIMEOUT = "JUDGE_TIMEOUT"
     JUDGE_LAUNCH_FAILED = "JUDGE_LAUNCH_FAILED"
     JUDGE_OUTPUT_NOT_UTF8 = "JUDGE_OUTPUT_NOT_UTF8"
@@ -95,19 +109,10 @@ class JudgeErrorReason(str, Enum):
     JUDGE_REQUEST_ID_MISMATCH = "JUDGE_REQUEST_ID_MISMATCH"
     INVALID_EVIDENCE_REFERENCE = "INVALID_EVIDENCE_REFERENCE"
     JUDGE_IDENTITY_MISMATCH = "JUDGE_IDENTITY_MISMATCH"
+    JUDGE_CONFIGURATION_MISMATCH = "JUDGE_CONFIGURATION_MISMATCH"
 
 
 class SemanticJudgeError(RuntimeError):
-    """Base error for isolated judge execution failures.
-
-    Every judge error carries one rejection contract:
-
-    - ``reason``: a stable ``JudgeErrorReason`` code; prose stays in the message;
-    - ``rejected_response``: the schema-valid response the boundary rejected,
-      or ``None`` when the failure occurred before one existed;
-    - ``details``: JSON-serializable structured evidence, never exception text.
-    """
-
     default_reason: JudgeErrorReason | None = None
 
     def __init__(
@@ -136,19 +141,18 @@ class SemanticJudgeProtocolError(SemanticJudgeError):
 
 
 class SemanticJudgeInvalidEvidenceReference(SemanticJudgeProtocolError):
-    """A schema-valid response cited evidence absent from the request."""
-
     default_reason = JudgeErrorReason.INVALID_EVIDENCE_REFERENCE
 
 
 class SemanticJudgeProvenanceMismatch(SemanticJudgeProtocolError):
-    """Returned provenance does not identify the judge the caller configured."""
-
     default_reason = JudgeErrorReason.JUDGE_IDENTITY_MISMATCH
 
 
+class SemanticJudgeConfigurationMismatch(SemanticJudgeProtocolError):
+    default_reason = JudgeErrorReason.JUDGE_CONFIGURATION_MISMATCH
+
+
 def _json_details(details: dict[str, Any] | None) -> dict[str, Any]:
-    """Require details to survive a strict JSON round-trip unchanged."""
     if details is None:
         return {}
     if not isinstance(details, dict):
@@ -162,8 +166,64 @@ def _json_details(details: dict[str, Any] | None) -> dict[str, Any]:
     return roundtrip
 
 
+def _validate_standard_json(value: Any, *, path: str = "$") -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{path} contains a non-finite number")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_standard_json(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{path} contains a non-string object key")
+            _validate_standard_json(item, path=f"{path}.{key}")
+        return
+    raise ValueError(f"{path} contains unsupported non-JSON type {type(value).__name__}")
+
+
+def _reject_nonstandard_constant(token: str) -> None:
+    raise ValueError(f"non-standard JSON numeric constant: {token}")
+
+
+def typed_json_equal(left: Any, right: Any) -> bool:
+    """JSON-type-aware equality; booleans never compare equal to numbers."""
+    if left is None or right is None:
+        return left is None and right is None
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) or isinstance(right, (int, float)):
+        if not isinstance(left, (int, float)) or not isinstance(right, (int, float)):
+            return False
+        if isinstance(left, float) and not math.isfinite(left):
+            return False
+        if isinstance(right, float) and not math.isfinite(right):
+            return False
+        return left == right
+    if isinstance(left, str) or isinstance(right, str):
+        return isinstance(left, str) and isinstance(right, str) and left == right
+    if isinstance(left, list) or isinstance(right, list):
+        return (
+            isinstance(left, list)
+            and isinstance(right, list)
+            and len(left) == len(right)
+            and all(typed_json_equal(a, b) for a, b in zip(left, right))
+        )
+    if isinstance(left, dict) or isinstance(right, dict):
+        return (
+            isinstance(left, dict)
+            and isinstance(right, dict)
+            and set(left) == set(right)
+            and all(typed_json_equal(left[key], right[key]) for key in left)
+        )
+    return False
+
+
 def request_evidence_refs(request: JudgeRequest) -> set[str]:
-    """Return the closed set of references a judge response may cite."""
     refs: set[str] = set()
     for row in request.observable_evidence:
         event_id = row.get("event_id")
@@ -179,20 +239,36 @@ def provenance_mismatches(
     expected: ExpectedJudgeIdentity,
     provenance: JudgeProvenance,
 ) -> dict[str, dict[str, Any]]:
-    """Return {field: {expected, observed}} for every configured field that differs."""
+    expected_values = expected.model_dump(mode="json", exclude_none=True)
+    observed_values = provenance.model_dump(mode="json")
     mismatches: dict[str, dict[str, Any]] = {}
-    for field, expected_value in expected.model_dump(exclude_none=True).items():
-        observed_value = getattr(provenance, field)
-        if observed_value != expected_value:
-            mismatches[field] = {
-                "expected": _plain(expected_value),
-                "observed": _plain(observed_value),
-            }
+    for field, expected_value in expected_values.items():
+        observed_value = observed_values[field]
+        if not typed_json_equal(expected_value, observed_value):
+            mismatches[field] = {"expected": expected_value, "observed": observed_value}
     return mismatches
 
 
-def _plain(value: Any) -> Any:
-    return value.value if isinstance(value, Enum) else value
+def configuration_mismatches(
+    expected: ExpectedJudgeConfiguration,
+    provenance: JudgeProvenance,
+) -> dict[str, dict[str, Any]]:
+    expected_values = expected.model_dump(mode="json", exclude_none=True)
+    observed_values = provenance.model_dump(mode="json")
+    mismatches: dict[str, dict[str, Any]] = {}
+    for field, expected_value in expected_values.items():
+        observed_value = observed_values[field]
+        if field == "generation_parameters":
+            missing_or_different = False
+            for key, value in expected_value.items():
+                if key not in observed_value or not typed_json_equal(value, observed_value[key]):
+                    missing_or_different = True
+                    break
+            if missing_or_different:
+                mismatches[field] = {"expected": expected_value, "observed": observed_value}
+        elif not typed_json_equal(expected_value, observed_value):
+            mismatches[field] = {"expected": expected_value, "observed": observed_value}
+    return mismatches
 
 
 def run_semantic_judge(
@@ -201,8 +277,8 @@ def run_semantic_judge(
     *,
     timeout_seconds: float = DEFAULT_JUDGE_TIMEOUT_SECONDS,
     expected_identity: ExpectedJudgeIdentity | None = None,
+    expected_configuration: ExpectedJudgeConfiguration | None = None,
 ) -> JudgeResponse:
-    """Execute one semantic judge request through a strict subprocess boundary."""
     payload = request.model_dump(mode="json")
     try:
         proc = subprocess.run(
@@ -215,11 +291,9 @@ def run_semantic_judge(
         )
     except subprocess.TimeoutExpired as exc:
         raise SemanticJudgeTimeout(
-            "semantic judge timed out",
-            details={"timeout_seconds": timeout_seconds},
+            "semantic judge timed out", details={"timeout_seconds": timeout_seconds}
         ) from exc
     except OSError as exc:
-        # Missing executable, permission denied, or other launch failure.
         raise SemanticJudgeProtocolError(
             f"semantic judge failed to launch: {exc}",
             reason=JudgeErrorReason.JUDGE_LAUNCH_FAILED,
@@ -246,10 +320,10 @@ def run_semantic_judge(
         )
 
     try:
-        raw = json.loads(stdout)
-    except json.JSONDecodeError as exc:
+        raw = json.loads(stdout, parse_constant=_reject_nonstandard_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise SemanticJudgeProtocolError(
-            "semantic judge stdout is not valid JSON",
+            "semantic judge stdout is not valid strict JSON",
             reason=JudgeErrorReason.JUDGE_MALFORMED_JSON,
         ) from exc
 
@@ -267,7 +341,6 @@ def run_semantic_judge(
             },
         ) from exc
 
-    # From here on the response is schema-valid; any rejection preserves it.
     if response.request_id != request.request_id:
         raise SemanticJudgeProtocolError(
             "semantic judge response request_id mismatch",
@@ -285,14 +358,29 @@ def run_semantic_judge(
             details={"invalid_refs": invalid_refs},
         )
 
-    if expected_identity is not None:
-        mismatches = provenance_mismatches(expected_identity, response.provenance)
-        if mismatches:
+    identity_mismatches = (
+        provenance_mismatches(expected_identity, response.provenance)
+        if expected_identity is not None
+        else {}
+    )
+    config_mismatches = (
+        configuration_mismatches(expected_configuration, response.provenance)
+        if expected_configuration is not None
+        else {}
+    )
+    if identity_mismatches or config_mismatches:
+        details = {**identity_mismatches, **config_mismatches}
+        if identity_mismatches:
             raise SemanticJudgeProvenanceMismatch(
-                f"semantic judge provenance does not match expected identity: {sorted(mismatches)}",
+                f"semantic judge provenance does not match expected identity: {sorted(identity_mismatches)}",
                 rejected_response=response,
-                details=mismatches,
+                details=details,
             )
+        raise SemanticJudgeConfigurationMismatch(
+            f"semantic judge provenance does not match expected configuration: {sorted(config_mismatches)}",
+            rejected_response=response,
+            details=details,
+        )
 
     return response
 
@@ -304,17 +392,6 @@ def integrate_semantic_candidate(
     response: JudgeResponse | None = None,
     judge_error: Exception | None = None,
 ) -> Verdict:
-    """Integrate a semantic candidate without granting semantic-only FAIL authority.
-
-    Precedence for V1.6 milestone 1:
-      global spec inconsistency -> REVIEW
-      deterministic FAIL -> FAIL
-      unresolved deterministic REVIEW -> REVIEW
-      judge execution/protocol uncertainty -> REVIEW
-      semantic PASS -> PASS
-      semantic FAIL -> REVIEW pending ADR-0015
-      semantic REVIEW -> REVIEW
-    """
     if specification_inconsistency:
         return Verdict.REVIEW
     if deterministic_verdict == Verdict.FAIL:
