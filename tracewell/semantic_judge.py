@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from enum import Enum
 import json
+import math
 import subprocess
 from typing import Any
 
-from pydantic import Field, ValidationError
+from pydantic import Field, StrictInt, ValidationError, field_validator
 
 from .models import StrictModel, Verdict
 
@@ -40,7 +41,7 @@ class JudgeProvenance(StrictModel):
     inference_engine_version: str | None = None
     quantization: str | None = None
     decoding_determinism_class: DecodingDeterminismClass
-    seed: int | None = None
+    seed: StrictInt | None = None  # no bool/float/str coercion (typed equality)
     generation_parameters: dict[str, Any] = Field(default_factory=dict)
     judge_prompt_version: str
     rubric_version: str
@@ -50,16 +51,104 @@ class JudgeProvenance(StrictModel):
 
 
 class ExpectedJudgeIdentity(StrictModel):
-    """Judge identity the caller configured; each non-null field must match."""
+    """What judge artifact must have run (ADR-0021 Amendment 1).
+
+    A null field is unconstrained; every non-null field must match exactly.
+    """
 
     judge_id: str | None = None
     judge_version: str | None = None
     model: str | None = None
     model_revision: str | None = None
-    decoding_determinism_class: DecodingDeterminismClass | None = None
+    weights_digest: str | None = None
     judge_prompt_version: str | None = None
     rubric_version: str | None = None
+
+
+class ExpectedJudgeConfiguration(StrictModel):
+    """How the judge must have run (ADR-0021 Amendment 1).
+
+    A null top-level field is unconstrained. ``generation_parameters`` is
+    matched as a subset: every expected key must be returned with an equal
+    value, and an expected value of ``None`` constrains that key to JSON null.
+    """
+
+    execution_mode: str | None = None
+    inference_engine: str | None = None
+    inference_engine_version: str | None = None
+    quantization: str | None = None
+    decoding_determinism_class: DecodingDeterminismClass | None = None
+    seed: StrictInt | None = None  # no bool/float/str coercion (typed equality)
+    generation_parameters: dict[str, Any] | None = None
     chat_template_digest: str | None = None
+
+    @field_validator("generation_parameters")
+    @classmethod
+    def _standard_json_only(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is not None:
+            require_standard_json(value, path="generation_parameters")
+        return value
+
+
+IDENTITY_FIELDS = tuple(ExpectedJudgeIdentity.model_fields)
+CONFIGURATION_FIELDS = tuple(ExpectedJudgeConfiguration.model_fields)
+assert not set(IDENTITY_FIELDS) & set(CONFIGURATION_FIELDS)
+
+
+def require_standard_json(value: Any, *, path: str = "$") -> None:
+    """Reject anything that is not a standard, finite JSON value."""
+    if value is None or isinstance(value, (bool, str)):
+        return
+    if isinstance(value, int):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{path}: non-finite number is not a valid JSON value")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            require_standard_json(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{path}: object keys must be strings")
+            require_standard_json(item, path=f"{path}.{key}")
+        return
+    raise ValueError(f"{path}: {type(value).__name__} is not a JSON value")
+
+
+def json_equal(left: Any, right: Any) -> bool:
+    """Typed equality over JSON values (ADR-0021 Amendment 1).
+
+    Values of different JSON types are never equal, so ``1 != True`` and
+    ``0.0 != "0.0"``; numbers compare by value (``0 == 0.0``); arrays are
+    ordered; objects need the same key set and equal values.
+    """
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) or isinstance(right, (int, float)):
+        return (
+            isinstance(left, (int, float))
+            and isinstance(right, (int, float))
+            and left == right
+        )
+    if left is None or right is None:
+        return left is None and right is None
+    if isinstance(left, str) or isinstance(right, str):
+        return isinstance(left, str) and isinstance(right, str) and left == right
+    if isinstance(left, list) or isinstance(right, list):
+        return (
+            isinstance(left, list)
+            and isinstance(right, list)
+            and len(left) == len(right)
+            and all(json_equal(a, b) for a, b in zip(left, right))
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            json_equal(left[key], right[key]) for key in left
+        )
+    return False
 
 
 class JudgeRequest(StrictModel):
@@ -95,6 +184,7 @@ class JudgeErrorReason(str, Enum):
     JUDGE_REQUEST_ID_MISMATCH = "JUDGE_REQUEST_ID_MISMATCH"
     INVALID_EVIDENCE_REFERENCE = "INVALID_EVIDENCE_REFERENCE"
     JUDGE_IDENTITY_MISMATCH = "JUDGE_IDENTITY_MISMATCH"
+    JUDGE_CONFIGURATION_MISMATCH = "JUDGE_CONFIGURATION_MISMATCH"
 
 
 class SemanticJudgeError(RuntimeError):
@@ -142,9 +232,34 @@ class SemanticJudgeInvalidEvidenceReference(SemanticJudgeProtocolError):
 
 
 class SemanticJudgeProvenanceMismatch(SemanticJudgeProtocolError):
-    """Returned provenance does not identify the judge the caller configured."""
+    """Returned provenance does not match the expected identity and/or configuration.
 
-    default_reason = JudgeErrorReason.JUDGE_IDENTITY_MISMATCH
+    ``reason`` is only the primary classification (identity wins when both
+    fail); the per-check mismatch maps say which comparisons actually failed.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        rejected_response: JudgeResponse,
+        identity_mismatches: dict[str, dict[str, Any]],
+        configuration_mismatches: dict[str, dict[str, Any]],
+    ) -> None:
+        if not identity_mismatches and not configuration_mismatches:
+            raise ValueError("a provenance mismatch requires at least one mismatched field")
+        super().__init__(
+            message,
+            reason=(
+                JudgeErrorReason.JUDGE_IDENTITY_MISMATCH
+                if identity_mismatches
+                else JudgeErrorReason.JUDGE_CONFIGURATION_MISMATCH
+            ),
+            rejected_response=rejected_response,
+            details={**identity_mismatches, **configuration_mismatches},
+        )
+        self.identity_mismatches = identity_mismatches
+        self.configuration_mismatches = configuration_mismatches
 
 
 def _json_details(details: dict[str, Any] | None) -> dict[str, Any]:
@@ -176,23 +291,54 @@ def request_evidence_refs(request: JudgeRequest) -> set[str]:
 
 
 def provenance_mismatches(
-    expected: ExpectedJudgeIdentity,
+    expected: ExpectedJudgeIdentity | ExpectedJudgeConfiguration,
     provenance: JudgeProvenance,
 ) -> dict[str, dict[str, Any]]:
-    """Return {field: {expected, observed}} for every configured field that differs."""
+    """Return {field: {expected, observed}} for every constrained field that differs.
+
+    Null top-level expectation fields are unconstrained. ``generation_parameters``
+    is compared as a subset; an expected key that is absent from the returned
+    parameters is reported with ``observed`` omitted from that key's entry.
+    """
     mismatches: dict[str, dict[str, Any]] = {}
-    for field, expected_value in expected.model_dump(exclude_none=True).items():
-        observed_value = getattr(provenance, field)
-        if observed_value != expected_value:
-            mismatches[field] = {
-                "expected": _plain(expected_value),
-                "observed": _plain(observed_value),
-            }
+    for field in type(expected).model_fields:
+        expected_value = _plain(getattr(expected, field))
+        if expected_value is None:
+            continue
+        observed_value = _plain(getattr(provenance, field))
+        if field == "generation_parameters":
+            differing = _generation_parameter_mismatches(expected_value, observed_value or {})
+            if differing:
+                mismatches[field] = {
+                    "expected": {key: expected_value[key] for key in differing},
+                    "observed": {
+                        key: observed_value[key]
+                        for key in differing
+                        if key in (observed_value or {})
+                    },
+                }
+        elif not json_equal(expected_value, observed_value):
+            mismatches[field] = {"expected": expected_value, "observed": observed_value}
     return mismatches
+
+
+def _generation_parameter_mismatches(
+    expected: dict[str, Any],
+    observed: dict[str, Any],
+) -> list[str]:
+    return sorted(
+        key
+        for key, value in expected.items()
+        if key not in observed or not json_equal(value, observed[key])
+    )
 
 
 def _plain(value: Any) -> Any:
     return value.value if isinstance(value, Enum) else value
+
+
+def _reject_non_standard_constant(token: str) -> Any:
+    raise ValueError(f"non-standard JSON constant {token!r}")
 
 
 def run_semantic_judge(
@@ -201,6 +347,7 @@ def run_semantic_judge(
     *,
     timeout_seconds: float = DEFAULT_JUDGE_TIMEOUT_SECONDS,
     expected_identity: ExpectedJudgeIdentity | None = None,
+    expected_configuration: ExpectedJudgeConfiguration | None = None,
 ) -> JudgeResponse:
     """Execute one semantic judge request through a strict subprocess boundary."""
     payload = request.model_dump(mode="json")
@@ -246,8 +393,9 @@ def run_semantic_judge(
         )
 
     try:
-        raw = json.loads(stdout)
-    except json.JSONDecodeError as exc:
+        # Strict JSON: NaN/Infinity/-Infinity are invalid protocol values.
+        raw = json.loads(stdout, parse_constant=_reject_non_standard_constant)
+    except ValueError as exc:
         raise SemanticJudgeProtocolError(
             "semantic judge stdout is not valid JSON",
             reason=JudgeErrorReason.JUDGE_MALFORMED_JSON,
@@ -285,14 +433,25 @@ def run_semantic_judge(
             details={"invalid_refs": invalid_refs},
         )
 
-    if expected_identity is not None:
-        mismatches = provenance_mismatches(expected_identity, response.provenance)
-        if mismatches:
-            raise SemanticJudgeProvenanceMismatch(
-                f"semantic judge provenance does not match expected identity: {sorted(mismatches)}",
-                rejected_response=response,
-                details=mismatches,
-            )
+    # Both comparisons always run so each check's outcome is known (ADR-0021).
+    identity_mismatches = (
+        provenance_mismatches(expected_identity, response.provenance)
+        if expected_identity is not None
+        else {}
+    )
+    configuration_mismatches = (
+        provenance_mismatches(expected_configuration, response.provenance)
+        if expected_configuration is not None
+        else {}
+    )
+    if identity_mismatches or configuration_mismatches:
+        raise SemanticJudgeProvenanceMismatch(
+            "semantic judge provenance does not match expectation: "
+            f"{sorted({**identity_mismatches, **configuration_mismatches})}",
+            rejected_response=response,
+            identity_mismatches=identity_mismatches,
+            configuration_mismatches=configuration_mismatches,
+        )
 
     return response
 

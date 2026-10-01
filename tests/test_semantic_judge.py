@@ -10,7 +10,11 @@ from tracewell.models import Verdict
 from tracewell.semantic_judge import (
     DEFAULT_JUDGE_TIMEOUT_SECONDS,
     DecodingDeterminismClass,
+    ExpectedJudgeConfiguration,
     ExpectedJudgeIdentity,
+    JudgeProvenance,
+    json_equal,
+    provenance_mismatches,
     JudgeErrorReason,
     SemanticJudgeError,
     SemanticJudgeProvenanceMismatch,
@@ -27,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MOCK = ROOT / "scripts" / "mock_semantic_judge.py"
 
 
-def request(mock_mode: str = "pass") -> JudgeRequest:
+def request(mock_mode: str = "pass", **mock_metadata) -> JudgeRequest:
     return JudgeRequest(
         request_id="judge-req-1",
         case_id="case-1",
@@ -35,7 +39,7 @@ def request(mock_mode: str = "pass") -> JudgeRequest:
         construct="semantic_alignment",
         rubric="Assess the observable response against the supplied rubric.",
         observable_evidence=[{"event_id": "e1", "output": "example"}],
-        metadata={"mock_mode": mock_mode},
+        metadata={"mock_mode": mock_mode, **mock_metadata},
     )
 
 
@@ -256,7 +260,6 @@ def test_fabricated_evidence_reference_cannot_preserve_pass():
 MOCK_IDENTITY = ExpectedJudgeIdentity(
     judge_id="tracewell.mock-semantic-judge",
     judge_version="1",
-    decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
     judge_prompt_version="mock-v1",
     rubric_version="mock-rubric-v1",
 )
@@ -274,7 +277,7 @@ def test_matching_expected_identity_is_accepted():
         ("judge_id", "tracewell.some-other-judge"),
         ("judge_version", "2"),
         ("model", "expected-model"),
-        ("decoding_determinism_class", DecodingDeterminismClass.SEEDED_STOCHASTIC),
+        ("weights_digest", "sha256:expected-weights"),
         ("rubric_version", "rubric-v2"),
     ],
 )
@@ -329,6 +332,7 @@ PINNED_REASON_CODES = {
     "JUDGE_REQUEST_ID_MISMATCH",
     "INVALID_EVIDENCE_REFERENCE",
     "JUDGE_IDENTITY_MISMATCH",
+    "JUDGE_CONFIGURATION_MISMATCH",
 }
 
 
@@ -414,20 +418,14 @@ def test_empty_and_non_utf8_output_reason_codes(tmp_path: Path):
 
 def test_identity_mismatch_details_use_provenance_fields_with_expected_observed():
     expected = MOCK_IDENTITY.model_copy(
-        update={
-            "model": "expected-model",
-            "decoding_determinism_class": DecodingDeterminismClass.SEEDED_STOCHASTIC,
-        }
+        update={"model": "expected-model", "weights_digest": "sha256:expected-weights"}
     )
     with pytest.raises(SemanticJudgeProvenanceMismatch) as excinfo:
         run_semantic_judge(command(), request("pass"), expected_identity=expected)
 
     assert excinfo.value.details == {
         "model": {"expected": "expected-model", "observed": None},
-        "decoding_determinism_class": {
-            "expected": "seeded_stochastic",
-            "observed": "deterministic",
-        },
+        "weights_digest": {"expected": "sha256:expected-weights", "observed": None},
     }
     assert excinfo.value.rejected_response is not None
 
@@ -452,3 +450,268 @@ def test_judge_error_details_must_be_plain_json(details):
         SemanticJudgeProtocolError(
             "bad details", reason=JudgeErrorReason.JUDGE_SCHEMA_INVALID, details=details
         )
+
+
+
+# --- ADR-0021 Amendment 1: configuration binding --------------------------------
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "equal"),
+    [
+        (0, 0.0, True),
+        (1, 1.0, True),
+        (0.0, "0.0", False),
+        (1, True, False),
+        (0, False, False),
+        (True, True, True),
+        (None, None, True),
+        (None, 0, False),
+        ("a", "a", True),
+        (["a", "b"], ["b", "a"], False),
+        (["a", "b"], ["a", "b"], True),
+        ({"a": 1}, {"a": 1.0}, True),
+        ({"a": 1}, {"a": 1, "b": 2}, False),
+        ({"a": [1, True]}, {"a": [1, 1]}, False),
+    ],
+)
+def test_json_equal_is_typed(left, right, equal):
+    assert json_equal(left, right) is equal
+    assert json_equal(right, left) is equal
+
+
+def provenance(**overrides) -> JudgeProvenance:
+    values = {
+        "judge_id": "j",
+        "judge_version": "1",
+        "execution_mode": "subprocess",
+        "inference_engine": "vllm",
+        "quantization": "fp16",
+        "decoding_determinism_class": "deterministic",
+        "generation_parameters": {"temperature": 0.0, "max_tokens": 256, "top_p": 1.0},
+        "judge_prompt_version": "p1",
+        "rubric_version": "r1",
+    }
+    values.update(overrides)
+    return JudgeProvenance(**values)
+
+
+def config(**fields) -> ExpectedJudgeConfiguration:
+    return ExpectedJudgeConfiguration(**fields)
+
+
+@pytest.mark.parametrize(
+    ("expected", "returned_parameters", "mismatch"),
+    [
+        # subset rule: extra returned keys are unconstrained
+        ({"temperature": 0.0}, {"temperature": 0.0, "max_tokens": 256, "top_p": 1.0}, None),
+        ({"temperature": 0.0}, {"temperature": 0.7, "max_tokens": 256}, ({"temperature": 0.0}, {"temperature": 0.7})),
+        ({"temperature": 0.0}, {"max_tokens": 256}, ({"temperature": 0.0}, {})),
+        # literal null inside generation_parameters
+        ({"x": None}, {"x": None}, None),
+        ({"x": None}, {"x": 0}, ({"x": None}, {"x": 0})),
+        ({"x": None}, {}, ({"x": None}, {})),
+        # typed equality per value
+        ({"temperature": 0}, {"temperature": 0.0}, None),
+        ({"n": 1}, {"n": True}, ({"n": 1}, {"n": True})),
+        ({"t": 0.0}, {"t": "0.0"}, ({"t": 0.0}, {"t": "0.0"})),
+        # nested values use full equality, not subset
+        ({"stop": ["a", "b"]}, {"stop": ["b", "a"]}, ({"stop": ["a", "b"]}, {"stop": ["b", "a"]})),
+        ({"opts": {"a": 1}}, {"opts": {"a": 1, "b": 2}}, ({"opts": {"a": 1}}, {"opts": {"a": 1, "b": 2}})),
+    ],
+)
+def test_generation_parameters_subset_matching(expected, returned_parameters, mismatch):
+    result = provenance_mismatches(
+        config(generation_parameters=expected),
+        provenance(generation_parameters=returned_parameters),
+    )
+    if mismatch is None:
+        assert result == {}
+    else:
+        assert result == {
+            "generation_parameters": {"expected": mismatch[0], "observed": mismatch[1]}
+        }
+
+
+def test_top_level_null_is_unconstrained_and_scalars_enums_are_exact():
+    observed = provenance()
+    assert provenance_mismatches(config(), observed) == {}
+    assert provenance_mismatches(config(quantization=None, seed=None), observed) == {}
+    assert provenance_mismatches(config(quantization="int4"), observed) == {
+        "quantization": {"expected": "int4", "observed": "fp16"}
+    }
+    assert provenance_mismatches(
+        config(decoding_determinism_class=DecodingDeterminismClass.SEEDED_STOCHASTIC),
+        observed,
+    ) == {
+        "decoding_determinism_class": {
+            "expected": "seeded_stochastic",
+            "observed": "deterministic",
+        }
+    }
+    assert provenance_mismatches(config(seed=7), observed) == {
+        "seed": {"expected": 7, "observed": None}
+    }
+
+
+def test_identity_and_configuration_cover_disjoint_provenance_fields():
+    identity = set(ExpectedJudgeIdentity.model_fields)
+    configuration = set(ExpectedJudgeConfiguration.model_fields)
+    assert identity == {
+        "judge_id", "judge_version", "model", "model_revision",
+        "weights_digest", "judge_prompt_version", "rubric_version",
+    }
+    assert configuration == {
+        "execution_mode", "inference_engine", "inference_engine_version", "quantization",
+        "decoding_determinism_class", "seed", "generation_parameters", "chat_template_digest",
+    }
+    assert not identity & configuration
+    assert (identity | configuration) <= set(JudgeProvenance.model_fields)
+
+
+def test_moved_fields_are_rejected_on_identity():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ExpectedJudgeIdentity(decoding_determinism_class="deterministic")
+    with pytest.raises(ValidationError):
+        ExpectedJudgeIdentity(chat_template_digest="sha256:x")
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"t": float("nan")},
+        {"t": float("inf")},
+        {"t": float("-inf")},
+        {"nested": {"t": [1.0, float("nan")]}},
+    ],
+)
+def test_non_finite_expected_values_fail_validation(parameters):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="non-finite"):
+        config(generation_parameters=parameters)
+
+
+def test_non_finite_returned_value_is_malformed_json_not_a_comparison():
+    with pytest.raises(SemanticJudgeProtocolError) as excinfo:
+        run_semantic_judge(
+            command(),
+            request("nonfinite"),
+            expected_configuration=config(quantization="fp16"),
+        )
+
+    assert excinfo.value.reason is JudgeErrorReason.JUDGE_MALFORMED_JSON
+    assert excinfo.value.rejected_response is None
+
+
+def test_configuration_mismatch_end_to_end_reason_and_details():
+    with pytest.raises(SemanticJudgeProvenanceMismatch) as excinfo:
+        run_semantic_judge(
+            command(),
+            request("pass", mock_generation_parameters={"temperature": 0.7}, mock_quantization="int4"),
+            expected_identity=MOCK_IDENTITY,
+            expected_configuration=config(
+                quantization="fp16", generation_parameters={"temperature": 0.0}
+            ),
+        )
+
+    error = excinfo.value
+    assert error.reason is JudgeErrorReason.JUDGE_CONFIGURATION_MISMATCH
+    assert error.identity_mismatches == {}
+    assert error.details == {
+        "quantization": {"expected": "fp16", "observed": "int4"},
+        "generation_parameters": {
+            "expected": {"temperature": 0.0},
+            "observed": {"temperature": 0.7},
+        },
+    }
+    assert error.rejected_response is not None
+
+
+def test_dual_mismatch_identity_is_primary_and_details_cover_both():
+    with pytest.raises(SemanticJudgeProvenanceMismatch) as excinfo:
+        run_semantic_judge(
+            command(),
+            request("pass", mock_quantization="int4"),
+            expected_identity=MOCK_IDENTITY.model_copy(update={"judge_version": "2"}),
+            expected_configuration=config(quantization="fp16"),
+        )
+
+    error = excinfo.value
+    # Primary classification only: the configuration check failed too.
+    assert error.reason is JudgeErrorReason.JUDGE_IDENTITY_MISMATCH
+    assert set(error.identity_mismatches) == {"judge_version"}
+    assert set(error.configuration_mismatches) == {"quantization"}
+    assert set(error.details) == {"judge_version", "quantization"}
+
+
+def test_matching_identity_and_configuration_are_accepted():
+    response = run_semantic_judge(
+        command(),
+        request("pass", mock_generation_parameters={"temperature": 0.0, "max_tokens": 64}),
+        expected_identity=MOCK_IDENTITY,
+        expected_configuration=config(
+            execution_mode="subprocess",
+            inference_engine="python",
+            decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
+            generation_parameters={"temperature": 0},
+        ),
+    )
+    assert response.candidate_label == Verdict.PASS
+
+
+def _raw_judge(tmp_path: Path, name: str, body: str) -> list[str]:
+    """A judge that echoes a fixed raw stdout body with the request's id."""
+    script = tmp_path / f"{name}.py"
+    script.write_text(
+        "import json, sys\n"
+        "request = json.loads(sys.stdin.read())\n"
+        f"sys.stdout.write({body!r}.replace('REQ', request['request_id']))\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(script)]
+
+
+VALID_RAW = (
+    '{"request_id": "REQ", "candidate_label": "PASS", "evidence_refs": [], '
+    '"provenance": {"judge_id": "j", "judge_version": "1", "execution_mode": "subprocess", '
+    '"decoding_determinism_class": "deterministic", "judge_prompt_version": "p", '
+    '"rubric_version": "r", "seed": SEED, "generation_parameters": {"temperature": TEMP}}}'
+)
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_every_non_finite_returned_token_is_malformed_json(tmp_path: Path, token):
+    judge = _raw_judge(tmp_path, "nonfinite", VALID_RAW.replace("SEED", "null").replace("TEMP", token))
+    with pytest.raises(SemanticJudgeProtocolError) as excinfo:
+        run_semantic_judge(judge, request(), expected_configuration=config(seed=1))
+    assert excinfo.value.reason is JudgeErrorReason.JUDGE_MALFORMED_JSON
+
+
+def test_finite_raw_response_parses_and_matches(tmp_path: Path):
+    judge = _raw_judge(tmp_path, "finite", VALID_RAW.replace("SEED", "7").replace("TEMP", "0"))
+    response = run_semantic_judge(
+        judge,
+        request(),
+        expected_configuration=config(seed=7, generation_parameters={"temperature": 0.0}),
+    )
+    assert response.provenance.seed == 7
+
+
+@pytest.mark.parametrize("value", [True, 1.0, "1"])
+def test_seed_is_never_coerced_on_the_expected_side(value):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        config(seed=value)
+
+
+@pytest.mark.parametrize("raw_seed", ["true", "1.0", '"1"'])
+def test_seed_is_never_coerced_on_the_returned_side(tmp_path: Path, raw_seed):
+    judge = _raw_judge(tmp_path, "seed", VALID_RAW.replace("SEED", raw_seed).replace("TEMP", "0"))
+    with pytest.raises(SemanticJudgeProtocolError) as excinfo:
+        run_semantic_judge(judge, request(), expected_configuration=config(seed=1))
+    # A non-integer seed is a schema failure, never a coerced MATCH.
+    assert excinfo.value.reason is JudgeErrorReason.JUDGE_SCHEMA_INVALID

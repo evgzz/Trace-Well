@@ -11,7 +11,8 @@ def main() -> int:
     raw = sys.stdin.read()
     request = json.loads(raw)
 
-    mode = request.get("metadata", {}).get("mock_mode", "pass")
+    metadata = request.get("metadata", {})
+    mode = metadata.get("mock_mode", "pass")
     if mode == "nonzero":
         print("mock semantic judge failure", file=sys.stderr)
         return 7
@@ -58,15 +59,18 @@ def main() -> int:
             "weights_digest": None,
             "inference_engine": "python",
             "inference_engine_version": sys.version.split()[0],
-            "quantization": None,
+            "quantization": metadata.get("mock_quantization"),
             "decoding_determinism_class": "deterministic",
             "seed": None,
-            "generation_parameters": {},
+            "generation_parameters": metadata.get("mock_generation_parameters", {}),
             "judge_prompt_version": "mock-v1",
             "rubric_version": "mock-rubric-v1"
         },
         "metadata": {"mock": True}
     }
+    if mode == "nonfinite":
+        # Python's json.dumps emits the non-standard NaN token by default.
+        response["observed_value"] = {"score": float("nan")}
     sys.stdout.write(json.dumps(response, sort_keys=True) + "\n")
     return 0
 

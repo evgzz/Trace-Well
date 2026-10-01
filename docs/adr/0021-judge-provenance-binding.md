@@ -28,6 +28,8 @@ Declared-file digests are computed before the inference request is sent, so a fi
 
 ### Expected judge identity is verified
 
+> Superseded in part by Amendment 1 below: `decoding_determinism_class` and `chat_template_digest` moved to `ExpectedJudgeConfiguration`, `weights_digest` was added to identity, and configuration is checked alongside identity.
+
 A caller may supply `ExpectedJudgeIdentity` (`judge_id`, `judge_version`, `model`, `model_revision`, `decoding_determinism_class`, `judge_prompt_version`, `rubric_version`, `chat_template_digest`). Every non-null field must equal the returned provenance. Any mismatch raises `SemanticJudgeProvenanceMismatch` (a `SemanticJudgeProtocolError`, reason `JUDGE_IDENTITY_MISMATCH`) and integrates as `REVIEW`.
 
 Expected identity is run configuration, not fixture content, so it is passed to `run_semantic_fixture` rather than stored in semantic fixtures. Omitting it preserves current behavior.
@@ -46,7 +48,7 @@ The default subprocess budget (`DEFAULT_JUDGE_TIMEOUT_SECONDS`) must exceed the 
 
 ## Amendment 1 — Expected judge configuration
 
-**Status:** Accepted for implementation. Not yet implemented. Once implemented, this amendment supersedes the field list in "Expected judge identity is verified" above; until then that section describes current behavior. ADR-0021 as a whole remains Proposed.
+**Status:** Accepted and implemented. This amendment supersedes the field list in "Expected judge identity is verified" above. ADR-0021 as a whole remains Proposed.
 
 ### Problem
 
