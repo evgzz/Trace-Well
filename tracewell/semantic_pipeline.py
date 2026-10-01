@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .evidence import write_run_evidence
 from .lifecycle import create_finding
@@ -72,6 +72,18 @@ class SemanticEvaluationEvidence(StrictModel):
     integrated_verdict: Verdict
     semantic_finding_authority: Literal["deterministic_only"] = "deterministic_only"
     semantic_finding_created: Literal[False] = False
+
+    @model_validator(mode="after")
+    def accepted_and_rejected_are_exclusive(self) -> "SemanticEvaluationEvidence":
+        if self.judge_response is not None and self.rejected_judge_response is not None:
+            raise ValueError("an attempt cannot have both an accepted and a rejected judge response")
+        if self.judge_response is not None and self.judge_error_type is not None:
+            raise ValueError("an accepted judge response cannot coexist with a judge error")
+        if self.rejected_judge_response is not None and self.judge_error_reason is None:
+            raise ValueError("a rejected judge response requires a judge_error_reason")
+        if self.judge_error_reason is not None and self.judge_error_type is None:
+            raise ValueError("judge_error_reason requires judge_error_type")
+        return self
 
 
 def load_semantic_fixture(path: Path) -> SemanticFixture:

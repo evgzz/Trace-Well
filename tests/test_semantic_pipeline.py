@@ -6,11 +6,13 @@ import sys
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from tracewell.models import EventType, Trace, Verdict
 from tracewell.semantic_judge import DecodingDeterminismClass
 from tracewell.semantic_pipeline import (
     SEMANTIC_FINDING_AUTHORITY,
+    SemanticEvaluationEvidence,
     load_semantic_fixture,
     observable_evidence,
     run_semantic_fixture,
@@ -212,3 +214,27 @@ def test_accepted_judge_refs_are_drawn_from_request_evidence(tmp_path: Path):
     assert set(evidence.judge_response.evidence_refs) <= allowed
     assert evidence.judge_error_reason is None
     assert evidence.rejected_judge_response is None
+
+
+def test_rejected_and_accepted_judge_responses_cannot_coexist(tmp_path: Path):
+    evidence, _ = run_semantic_fixture(
+        _fixture_with_mock_mode(tmp_path, "fabricated_ref"),
+        cases_root=CASES,
+        output_dir=tmp_path / "runs",
+        run_id="semantic-exclusive",
+        judge_command=judge_command(),
+    )
+    payload = evidence.model_dump(mode="json")
+    rejected = payload["rejected_judge_response"]
+
+    both = {**payload, "judge_response": rejected}
+    with pytest.raises(ValidationError, match="both an accepted and a rejected"):
+        SemanticEvaluationEvidence.model_validate(both)
+
+    accepted_with_error = {**payload, "judge_response": rejected, "rejected_judge_response": None}
+    with pytest.raises(ValidationError, match="cannot coexist with a judge error"):
+        SemanticEvaluationEvidence.model_validate(accepted_with_error)
+
+    rejected_without_reason = {**payload, "judge_error_reason": None}
+    with pytest.raises(ValidationError, match="requires a judge_error_reason"):
+        SemanticEvaluationEvidence.model_validate(rejected_without_reason)
