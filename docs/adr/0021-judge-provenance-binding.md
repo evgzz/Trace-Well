@@ -104,15 +104,48 @@ returned {max_tokens: 256}                                 -> MISMATCH -> REVIEW
 expected quantization fp16, returned int4                  -> MISMATCH -> REVIEW
 ```
 
-Values are compared after JSON normalization, so `0` and `0.0` are equal; nested values within a generation parameter compare by exact JSON equality.
+#### Value equality
+
+All comparisons, including each value inside `generation_parameters`, use typed equality over the normalized JSON value, never over stringified values and never Python's native `==` (under which `True == 1`):
+
+| JSON type | Equal when |
+|---|---|
+| number | both are numbers (not booleans) with the same numeric value, so `0 == 0.0` |
+| string | both are strings with identical content |
+| boolean | both are booleans with the same value |
+| null | both are null |
+| array | same length and pairwise equal in order |
+| object | same key set and every value pairwise equal |
+
+Values of different JSON types are never equal:
+
+```text
+0.0        != "0.0"
+1          != true
+["a", "b"] != ["b", "a"]
+```
+
+The subset rule applies only at the top level of `generation_parameters`; nested objects and arrays inside a parameter value compare by the full typed equality above.
 
 #### Evaluation and recording
 
 - Both comparisons run on any response that passes schema, request-ID and evidence-reference validation, so both outcomes are always known together.
 - Each is recorded independently with the same four-state status: `judge_identity_check` and a new `judge_configuration_check`, each one of `NOT_REQUESTED | MATCH | MISMATCH | NOT_EVALUATED`. `expected_judge_configuration` is persisted alongside `expected_judge_identity`.
 - Any mismatch rejects the response under the existing rejection contract (`rejected_judge_response` preserved, `integrated_verdict = REVIEW`).
-- A new reason code `JUDGE_CONFIGURATION_MISMATCH` is added. When both comparisons mismatch, `judge_error_reason` is `JUDGE_IDENTITY_MISMATCH` (identity takes precedence), and both statuses record `MISMATCH`.
-- Because the two models cover disjoint fields, `judge_error_details` stays a flat `{field: {expected, observed}}` map containing every mismatched field from both comparisons, with no change to the existing details shape.
+- A new reason code `JUDGE_CONFIGURATION_MISMATCH` is added.
+
+The persisted fields have distinct, non-overlapping roles:
+
+```text
+judge_error_reason         primary rejection classification (one code)
+judge_identity_check       independent identity comparison result
+judge_configuration_check  independent configuration comparison result
+judge_error_details        complete mismatch evidence from both checks
+```
+
+When both comparisons mismatch, `judge_error_reason` is `JUDGE_IDENTITY_MISMATCH` and both statuses record `MISMATCH`. **The reason code is only the primary classification; it is not a claim that the other check passed.** Consumers must read `judge_identity_check` and `judge_configuration_check` to learn which comparisons failed, never infer it from `judge_error_reason` alone.
+
+Because the two models cover disjoint fields, `judge_error_details` stays a flat `{field: {expected, observed}}` map containing every mismatched field from both comparisons, with no change to the existing details shape.
 
 ### Known limitation: seed
 
@@ -120,7 +153,7 @@ A `null` expectation means "unconstrained", so `seed: null` cannot express "must
 
 ### Migration
 
-Moving two fields out of `ExpectedJudgeIdentity` is a breaking schema change for callers and for any persisted `expected_judge_identity` records that set them. V1.6 semantic outputs are prototype evidence and no live calibration records exist yet, so the change is made directly rather than with a compatibility shim. Implementation must land with tests covering every row of the comparison table, both precedence cases, and the subset rule's absent-key case.
+Moving two fields out of `ExpectedJudgeIdentity` is a breaking schema change for callers and for any persisted `expected_judge_identity` records that set them. V1.6 semantic outputs are prototype evidence and no live calibration records exist yet, so the change is made directly rather than with a compatibility shim. Implementation must land with tests covering every row of both comparison tables, the three cross-type inequalities above, both precedence cases (including that a dual mismatch records `MISMATCH` in both statuses and both field sets in details), and the subset rule's absent-key case.
 
 ### Alternatives considered
 
