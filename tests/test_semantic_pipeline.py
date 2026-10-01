@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 import pytest
+import yaml
 
 from tracewell.models import EventType, Trace, Verdict
 from tracewell.semantic_judge import DecodingDeterminismClass
@@ -127,3 +128,87 @@ def test_observable_evidence_excludes_event_metadata():
     assert rows[0]["event_id"] == "e1"
     assert rows[0]["output"] == {"action": "continue", "text": "observable"}
     assert "must-not-leak" not in json.dumps(rows)
+
+
+def _fixture_with_mock_mode(tmp_path: Path, mock_mode: str) -> Path:
+    payload = yaml.safe_load((SEMANTIC_CASES / "sem-001-pass.yaml").read_text(encoding="utf-8"))
+    payload["fixture_id"] = f"sem-test-{mock_mode}"
+    payload["judge_metadata"] = {"mock_mode": mock_mode}
+    payload["expected_integrated_verdict"] = "REVIEW"
+    path = tmp_path / f"{mock_mode}.yaml"
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    return path
+
+
+DETERMINISTIC_FILES = (
+    "manifest.json",
+    "canonical_trace.json",
+    "perturbed_trace.json",
+    "result.json",
+)
+
+
+def test_judge_launch_failure_is_review_with_complete_evidence_package(tmp_path: Path):
+    evidence, run_dir = run_semantic_fixture(
+        SEMANTIC_CASES / "sem-001-pass.yaml",
+        cases_root=CASES,
+        output_dir=tmp_path / "runs",
+        run_id="semantic-launch-failure",
+        judge_command=[str(tmp_path / "missing-judge")],
+    )
+
+    assert evidence.deterministic_pair_verdict == Verdict.PASS
+    assert evidence.judge_response is None
+    assert evidence.judge_error_type == "SemanticJudgeProtocolError"
+    assert evidence.integrated_verdict == Verdict.REVIEW
+    for name in (*DETERMINISTIC_FILES, "semantic_result.json"):
+        assert (run_dir / name).is_file()
+
+    persisted = json.loads((run_dir / "semantic_result.json").read_text(encoding="utf-8"))
+    assert persisted["integrated_verdict"] == "REVIEW"
+    assert "failed to launch" in persisted["judge_error_message"]
+
+
+def test_fabricated_evidence_reference_is_review_and_persisted(tmp_path: Path):
+    evidence, run_dir = run_semantic_fixture(
+        _fixture_with_mock_mode(tmp_path, "fabricated_ref"),
+        cases_root=CASES,
+        output_dir=tmp_path / "runs",
+        run_id="semantic-fabricated-ref",
+        judge_command=judge_command(),
+    )
+
+    assert evidence.deterministic_pair_verdict == Verdict.PASS
+    assert evidence.integrated_verdict == Verdict.REVIEW
+    # Never accepted as a semantic candidate...
+    assert evidence.judge_response is None
+    assert evidence.judge_error_type == "SemanticJudgeInvalidEvidenceReference"
+    assert evidence.judge_error_reason == "INVALID_EVIDENCE_REFERENCE"
+    # ...but not silently discarded either.
+    assert evidence.rejected_judge_response is not None
+    assert evidence.rejected_judge_response.evidence_refs == ["mock:fabricated:1"]
+    assert not (run_dir / "finding.json").exists()
+
+    persisted = json.loads((run_dir / "semantic_result.json").read_text(encoding="utf-8"))
+    assert persisted["judge_error_reason"] == "INVALID_EVIDENCE_REFERENCE"
+    assert persisted["rejected_judge_response"]["evidence_refs"] == ["mock:fabricated:1"]
+    assert persisted["judge_response"] is None
+
+
+def test_accepted_judge_refs_are_drawn_from_request_evidence(tmp_path: Path):
+    evidence, _ = run_semantic_fixture(
+        SEMANTIC_CASES / "sem-001-pass.yaml",
+        cases_root=CASES,
+        output_dir=tmp_path / "runs",
+        run_id="semantic-valid-refs",
+        judge_command=judge_command(),
+    )
+
+    assert evidence.judge_response is not None
+    assert evidence.judge_response.evidence_refs
+    allowed = {row["event_id"] for row in evidence.judge_request.observable_evidence}
+    for row in evidence.judge_request.observable_evidence:
+        allowed.update(row["evidence_refs"])
+    assert set(evidence.judge_response.evidence_refs) <= allowed
+    assert evidence.judge_error_reason is None
+    assert evidence.rejected_judge_response is None
