@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .evidence import write_run_evidence
 from .lifecycle import create_finding
@@ -30,6 +30,7 @@ from .semantic_judge import (
     JudgeRequest,
     JudgeResponse,
     SemanticJudgeError,
+    SemanticJudgeInvalidEvidenceReference,
     integrate_semantic_candidate,
     run_semantic_judge,
 )
@@ -65,9 +66,26 @@ class SemanticEvaluationEvidence(StrictModel):
     judge_response: JudgeResponse | None = None
     judge_error_type: str | None = None
     judge_error_message: str | None = None
+    judge_error_reason: str | None = None
+    # A schema-valid response rejected by the protocol boundary (for example,
+    # fabricated evidence references). Persisted for inspection only; it never
+    # contributes a semantic candidate.
+    rejected_judge_response: JudgeResponse | None = None
     integrated_verdict: Verdict
     semantic_finding_authority: Literal["deterministic_only"] = "deterministic_only"
     semantic_finding_created: Literal[False] = False
+
+    @model_validator(mode="after")
+    def accepted_and_rejected_are_exclusive(self) -> "SemanticEvaluationEvidence":
+        if self.judge_response is not None and self.rejected_judge_response is not None:
+            raise ValueError("an attempt cannot have both an accepted and a rejected judge response")
+        if self.judge_response is not None and self.judge_error_type is not None:
+            raise ValueError("an accepted judge response cannot coexist with a judge error")
+        if self.rejected_judge_response is not None and self.judge_error_reason is None:
+            raise ValueError("a rejected judge response requires a judge_error_reason")
+        if self.judge_error_reason is not None and self.judge_error_type is None:
+            raise ValueError("judge_error_reason requires judge_error_type")
+        return self
 
 
 def load_semantic_fixture(path: Path) -> SemanticFixture:
@@ -178,6 +196,10 @@ def run_semantic_fixture(
     except SemanticJudgeError as exc:
         judge_error = exc
 
+    rejected_response: JudgeResponse | None = None
+    if isinstance(judge_error, SemanticJudgeInvalidEvidenceReference):
+        rejected_response = judge_error.response
+
     integrated = integrate_semantic_candidate(
         deterministic_verdict=deterministic_result.pair_result,
         specification_inconsistency=spec_inconsistency,
@@ -205,6 +227,8 @@ def run_semantic_fixture(
         judge_response=response,
         judge_error_type=type(judge_error).__name__ if judge_error is not None else None,
         judge_error_message=str(judge_error) if judge_error is not None else None,
+        judge_error_reason=getattr(judge_error, "reason", None),
+        rejected_judge_response=rejected_response,
         integrated_verdict=integrated,
     )
 
