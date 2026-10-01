@@ -9,7 +9,11 @@ import yaml
 from pydantic import ValidationError
 
 from tracewell.models import EventType, Trace, Verdict
-from tracewell.semantic_judge import DecodingDeterminismClass, ExpectedJudgeIdentity
+from tracewell.semantic_judge import (
+    DecodingDeterminismClass,
+    ExpectedJudgeConfiguration,
+    ExpectedJudgeIdentity,
+)
 from tracewell.semantic_pipeline import (
     SEMANTIC_FINDING_AUTHORITY,
     SemanticEvaluationEvidence,
@@ -45,7 +49,6 @@ def test_semantic_fixture_end_to_end_persists_separate_evidence(
 ):
     fixture_path = SEMANTIC_CASES / filename
     fixture = load_semantic_fixture(fixture_path)
-
     evidence, run_dir = run_semantic_fixture(
         fixture_path,
         cases_root=CASES,
@@ -53,7 +56,6 @@ def test_semantic_fixture_end_to_end_persists_separate_evidence(
         run_id=f"semantic-{fixture.fixture_id}",
         judge_command=judge_command(),
     )
-
     assert evidence.deterministic_pair_verdict == Verdict.PASS
     assert evidence.judge_response is not None
     assert evidence.judge_response.candidate_label == candidate
@@ -66,27 +68,26 @@ def test_semantic_fixture_end_to_end_persists_separate_evidence(
         evidence.judge_response.provenance.decoding_determinism_class
         == DecodingDeterminismClass.DETERMINISTIC
     )
-
-    assert (run_dir / "manifest.json").is_file()
-    assert (run_dir / "canonical_trace.json").is_file()
-    assert (run_dir / "perturbed_trace.json").is_file()
-    assert (run_dir / "result.json").is_file()
-    assert (run_dir / "semantic_result.json").is_file()
-
-    # The underlying deterministic pair passes, so no deterministic finding is
-    # created. Semantic candidate FAIL/REVIEW must not introduce one either.
+    for name in (
+        "manifest.json",
+        "canonical_trace.json",
+        "perturbed_trace.json",
+        "result.json",
+        "semantic_result.json",
+    ):
+        assert (run_dir / name).is_file()
     assert not (run_dir / "finding.json").exists()
-
     persisted = json.loads((run_dir / "semantic_result.json").read_text(encoding="utf-8"))
     assert persisted["integrated_verdict"] == integrated.value
     assert persisted["semantic_finding_authority"] == "deterministic_only"
     assert persisted["semantic_finding_created"] is False
     assert persisted["judge_response"]["candidate_label"] == candidate.value
+    assert persisted["judge_identity_check"] == "NOT_REQUESTED"
+    assert persisted["judge_configuration_check"] == "NOT_REQUESTED"
 
 
 def test_candidate_fail_is_review_and_never_creates_semantic_finding(tmp_path: Path):
     fixture_path = SEMANTIC_CASES / "sem-002-candidate-fail.yaml"
-
     evidence, run_dir = run_semantic_fixture(
         fixture_path,
         cases_root=CASES,
@@ -94,7 +95,6 @@ def test_candidate_fail_is_review_and_never_creates_semantic_finding(tmp_path: P
         run_id="semantic-candidate-fail",
         judge_command=judge_command(),
     )
-
     assert evidence.deterministic_pair_verdict == Verdict.PASS
     assert evidence.judge_response is not None
     assert evidence.judge_response.candidate_label == Verdict.FAIL
@@ -122,9 +122,7 @@ def test_observable_evidence_excludes_event_metadata():
             )
         ],
     )
-
     rows = observable_evidence(trace)
-
     assert len(rows) == 1
     assert "metadata" not in rows[0]
     assert rows[0]["event_id"] == "e1"
@@ -158,14 +156,12 @@ def test_judge_launch_failure_is_review_with_complete_evidence_package(tmp_path:
         run_id="semantic-launch-failure",
         judge_command=[str(tmp_path / "missing-judge")],
     )
-
     assert evidence.deterministic_pair_verdict == Verdict.PASS
     assert evidence.judge_response is None
     assert evidence.judge_error_type == "SemanticJudgeProtocolError"
     assert evidence.integrated_verdict == Verdict.REVIEW
     for name in (*DETERMINISTIC_FILES, "semantic_result.json"):
         assert (run_dir / name).is_file()
-
     persisted = json.loads((run_dir / "semantic_result.json").read_text(encoding="utf-8"))
     assert persisted["integrated_verdict"] == "REVIEW"
     assert "failed to launch" in persisted["judge_error_message"]
@@ -179,18 +175,14 @@ def test_fabricated_evidence_reference_is_review_and_persisted(tmp_path: Path):
         run_id="semantic-fabricated-ref",
         judge_command=judge_command(),
     )
-
     assert evidence.deterministic_pair_verdict == Verdict.PASS
     assert evidence.integrated_verdict == Verdict.REVIEW
-    # Never accepted as a semantic candidate...
     assert evidence.judge_response is None
     assert evidence.judge_error_type == "SemanticJudgeInvalidEvidenceReference"
     assert evidence.judge_error_reason == "INVALID_EVIDENCE_REFERENCE"
-    # ...but not silently discarded either.
     assert evidence.rejected_judge_response is not None
     assert evidence.rejected_judge_response.evidence_refs == ["mock:fabricated:1"]
     assert not (run_dir / "finding.json").exists()
-
     persisted = json.loads((run_dir / "semantic_result.json").read_text(encoding="utf-8"))
     assert persisted["judge_error_reason"] == "INVALID_EVIDENCE_REFERENCE"
     assert persisted["rejected_judge_response"]["evidence_refs"] == ["mock:fabricated:1"]
@@ -205,7 +197,6 @@ def test_accepted_judge_refs_are_drawn_from_request_evidence(tmp_path: Path):
         run_id="semantic-valid-refs",
         judge_command=judge_command(),
     )
-
     assert evidence.judge_response is not None
     assert evidence.judge_response.evidence_refs
     allowed = {row["event_id"] for row in evidence.judge_request.observable_evidence}
@@ -226,19 +217,14 @@ def test_rejected_and_accepted_judge_responses_cannot_coexist(tmp_path: Path):
     )
     payload = evidence.model_dump(mode="json")
     rejected = payload["rejected_judge_response"]
-
-    both = {**payload, "judge_response": rejected}
     with pytest.raises(ValidationError, match="both an accepted and a rejected"):
-        SemanticEvaluationEvidence.model_validate(both)
-
-    accepted_with_error = {**payload, "judge_response": rejected, "rejected_judge_response": None}
+        SemanticEvaluationEvidence.model_validate({**payload, "judge_response": rejected})
     with pytest.raises(ValidationError, match="cannot coexist with a judge error"):
-        SemanticEvaluationEvidence.model_validate(accepted_with_error)
-
-    rejected_without_reason = {**payload, "judge_error_reason": None}
+        SemanticEvaluationEvidence.model_validate(
+            {**payload, "judge_response": rejected, "rejected_judge_response": None}
+        )
     with pytest.raises(ValidationError, match="requires a judge_error_reason"):
-        SemanticEvaluationEvidence.model_validate(rejected_without_reason)
-
+        SemanticEvaluationEvidence.model_validate({**payload, "judge_error_reason": None})
 
 
 def test_judge_identity_mismatch_is_review_with_complete_evidence_package(tmp_path: Path):
@@ -250,16 +236,12 @@ def test_judge_identity_mismatch_is_review_with_complete_evidence_package(tmp_pa
         judge_command=judge_command(),
         expected_identity=ExpectedJudgeIdentity(judge_id="tracewell.expected-judge"),
     )
-
     assert evidence.deterministic_pair_verdict == Verdict.PASS
     assert evidence.judge_response is None
     assert evidence.judge_error_type == "SemanticJudgeProvenanceMismatch"
     assert "judge_id" in evidence.judge_error_message
     assert evidence.integrated_verdict == Verdict.REVIEW
     assert (run_dir / "semantic_result.json").is_file()
-
-
-# --- unified rejection contract, end to end -------------------------------------
 
 
 def _run(tmp_path: Path, run_id: str, **kwargs):
@@ -287,7 +269,6 @@ def _assert_rejection(evidence, run_dir, *, reason: str, has_rejected_response: 
     assert persisted["judge_error_reason"] == reason
     assert (persisted["rejected_judge_response"] is not None) is has_rejected_response
     assert isinstance(persisted["judge_error_details"], dict)
-    # The persisted record is plain JSON and re-validates to the same evidence.
     assert SemanticEvaluationEvidence.model_validate(persisted) == evidence
     assert not (run_dir / "finding.json").exists()
     return persisted
@@ -349,7 +330,6 @@ def test_launch_failure_and_timeout_have_no_rejected_response(tmp_path: Path):
         judge_command=[str(tmp_path / "missing-judge")],
     )
     _assert_rejection(evidence, run_dir, reason="JUDGE_LAUNCH_FAILED", has_rejected_response=False)
-
     sleeper = tmp_path / "sleep_judge.py"
     sleeper.write_text("import time\ntime.sleep(0.5)\n", encoding="utf-8")
     evidence, run_dir = _run(
@@ -366,9 +346,8 @@ def test_launch_failure_and_timeout_have_no_rejected_response(tmp_path: Path):
 
 def test_rejection_details_are_deterministic_across_runs(tmp_path: Path):
     expected_identity = ExpectedJudgeIdentity(judge_id="tracewell.expected-judge")
-    first, first_dir = _run(tmp_path, "determinism-1", expected_identity=expected_identity)
-    second, second_dir = _run(tmp_path, "determinism-2", expected_identity=expected_identity)
-
+    _, first_dir = _run(tmp_path, "determinism-1", expected_identity=expected_identity)
+    _, second_dir = _run(tmp_path, "determinism-2", expected_identity=expected_identity)
     for key in ("judge_error_reason", "judge_error_details"):
         assert _persisted(first_dir)[key] == _persisted(second_dir)[key]
 
@@ -376,7 +355,6 @@ def test_rejection_details_are_deterministic_across_runs(tmp_path: Path):
 def test_accepted_response_has_no_error_fields(tmp_path: Path):
     evidence, run_dir = _run(tmp_path, "accepted")
     persisted = _persisted(run_dir)
-
     assert evidence.judge_response is not None
     for key in (
         "judge_error_type",
@@ -401,24 +379,24 @@ def test_judge_error_without_reason_code_is_schema_invalid(tmp_path: Path):
         SemanticEvaluationEvidence.model_validate({**payload, "judge_error_reason": "free text"})
 
 
-
-# --- expected-identity evidence ------------------------------------------------
-
 MOCK_EXPECTED = ExpectedJudgeIdentity(
     judge_id="tracewell.mock-semantic-judge",
     judge_version="1",
-    decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
     rubric_version="mock-rubric-v1",
+)
+
+MOCK_CONFIGURATION = ExpectedJudgeConfiguration(
+    execution_mode="subprocess",
+    inference_engine="python",
+    decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
+    generation_parameters={},
 )
 
 
 def test_identity_check_not_requested_is_distinguishable_from_match(tmp_path: Path):
     unchecked, unchecked_dir = _run(tmp_path, "identity-not-requested")
     checked, checked_dir = _run(tmp_path, "identity-match", expected_identity=MOCK_EXPECTED)
-
-    # Same accepted response either way...
     assert unchecked.judge_response is not None and checked.judge_response is not None
-    # ...but the audit record shows whether the comparison was enforced.
     assert _persisted(unchecked_dir)["judge_identity_check"] == "NOT_REQUESTED"
     assert _persisted(unchecked_dir)["expected_judge_identity"] is None
     assert _persisted(checked_dir)["judge_identity_check"] == "MATCH"
@@ -431,7 +409,6 @@ def test_identity_mismatch_persists_expected_identity_and_status(tmp_path: Path)
     persisted = _assert_rejection(
         evidence, run_dir, reason="JUDGE_IDENTITY_MISMATCH", has_rejected_response=True
     )
-
     assert persisted["judge_identity_check"] == "MISMATCH"
     assert persisted["expected_judge_identity"]["model_revision"] == "pinned-rev"
     assert persisted["judge_error_details"] == {
@@ -447,7 +424,6 @@ def test_identity_not_evaluated_when_judge_fails_before_comparison(tmp_path: Pat
         fixture=_fixture_with_mock_mode(tmp_path, mock_mode),
         expected_identity=MOCK_EXPECTED,
     )
-
     persisted = _persisted(run_dir)
     assert persisted["judge_identity_check"] == "NOT_EVALUATED"
     assert persisted["expected_judge_identity"] is not None
@@ -455,28 +431,106 @@ def test_identity_not_evaluated_when_judge_fails_before_comparison(tmp_path: Pat
     assert evidence.integrated_verdict == Verdict.REVIEW
 
 
-def test_identity_check_status_must_be_consistent(tmp_path: Path):
-    accepted, _ = _run(tmp_path, "identity-consistency-accepted")
-    payload = accepted.model_dump(mode="json")
+def test_configuration_check_match_and_mismatch_are_persisted(tmp_path: Path):
+    matched, matched_dir = _run(
+        tmp_path,
+        "configuration-match",
+        expected_configuration=MOCK_CONFIGURATION,
+    )
+    assert matched.judge_response is not None
+    persisted = _persisted(matched_dir)
+    assert persisted["judge_configuration_check"] == "MATCH"
+    assert persisted["expected_judge_configuration"] == MOCK_CONFIGURATION.model_dump(mode="json")
 
-    with pytest.raises(ValidationError, match="NOT_REQUESTED iff"):
+    mismatch = MOCK_CONFIGURATION.model_copy(update={"quantization": "fp16"})
+    rejected, rejected_dir = _run(
+        tmp_path,
+        "configuration-mismatch",
+        expected_configuration=mismatch,
+    )
+    persisted = _assert_rejection(
+        rejected,
+        rejected_dir,
+        reason="JUDGE_CONFIGURATION_MISMATCH",
+        has_rejected_response=True,
+    )
+    assert persisted["judge_configuration_check"] == "MISMATCH"
+    assert persisted["judge_identity_check"] == "NOT_REQUESTED"
+    assert persisted["judge_error_details"] == {
+        "quantization": {"expected": "fp16", "observed": None}
+    }
+
+
+def test_dual_mismatch_records_both_statuses_and_identity_primary_reason(tmp_path: Path):
+    identity = MOCK_EXPECTED.model_copy(update={"model": "expected-model"})
+    configuration = MOCK_CONFIGURATION.model_copy(update={"quantization": "fp16"})
+    evidence, run_dir = _run(
+        tmp_path,
+        "dual-mismatch",
+        expected_identity=identity,
+        expected_configuration=configuration,
+    )
+    persisted = _assert_rejection(
+        evidence,
+        run_dir,
+        reason="JUDGE_IDENTITY_MISMATCH",
+        has_rejected_response=True,
+    )
+    assert persisted["judge_identity_check"] == "MISMATCH"
+    assert persisted["judge_configuration_check"] == "MISMATCH"
+    assert set(persisted["judge_error_details"]) == {"model", "quantization"}
+
+
+def test_configuration_match_is_recorded_even_when_identity_mismatches(tmp_path: Path):
+    identity = MOCK_EXPECTED.model_copy(update={"judge_id": "other"})
+    evidence, run_dir = _run(
+        tmp_path,
+        "identity-only-mismatch",
+        expected_identity=identity,
+        expected_configuration=MOCK_CONFIGURATION,
+    )
+    persisted = _persisted(run_dir)
+    assert persisted["judge_identity_check"] == "MISMATCH"
+    assert persisted["judge_configuration_check"] == "MATCH"
+    assert evidence.integrated_verdict == Verdict.REVIEW
+
+
+@pytest.mark.parametrize("mock_mode", ["nonzero", "fabricated_ref"])
+def test_configuration_not_evaluated_when_rejected_before_comparison(tmp_path: Path, mock_mode):
+    evidence, run_dir = _run(
+        tmp_path,
+        f"configuration-not-evaluated-{mock_mode}",
+        fixture=_fixture_with_mock_mode(tmp_path, mock_mode),
+        expected_configuration=MOCK_CONFIGURATION,
+    )
+    persisted = _persisted(run_dir)
+    assert persisted["judge_configuration_check"] == "NOT_EVALUATED"
+    assert persisted["expected_judge_configuration"] is not None
+    assert evidence.integrated_verdict == Verdict.REVIEW
+
+
+def test_check_statuses_must_be_consistent(tmp_path: Path):
+    accepted, _ = _run(tmp_path, "check-consistency-accepted")
+    payload = accepted.model_dump(mode="json")
+    with pytest.raises(ValidationError, match="judge_identity_check must be"):
         SemanticEvaluationEvidence.model_validate({**payload, "judge_identity_check": "MATCH"})
-    with pytest.raises(ValidationError, match="NOT_REQUESTED iff"):
+    with pytest.raises(ValidationError, match="judge_configuration_check must be"):
         SemanticEvaluationEvidence.model_validate(
-            {**payload, "expected_judge_identity": MOCK_EXPECTED.model_dump(mode="json")}
+            {**payload, "judge_configuration_check": "MATCH"}
         )
 
     rejected, _ = _run(
         tmp_path,
-        "identity-consistency-rejected",
+        "check-consistency-rejected",
         expected_identity=MOCK_EXPECTED.model_copy(update={"judge_id": "other"}),
+        expected_configuration=MOCK_CONFIGURATION,
     )
     rejected_payload = rejected.model_dump(mode="json")
-    with pytest.raises(ValidationError, match="MISMATCH iff"):
+    with pytest.raises(ValidationError, match="judge_identity_check must be"):
         SemanticEvaluationEvidence.model_validate(
             {**rejected_payload, "judge_identity_check": "NOT_EVALUATED"}
         )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="judge_configuration_check must be"):
         SemanticEvaluationEvidence.model_validate(
-            {**rejected_payload, "judge_identity_check": "SKIPPED"}
+            {**rejected_payload, "judge_configuration_check": "NOT_EVALUATED"}
         )
