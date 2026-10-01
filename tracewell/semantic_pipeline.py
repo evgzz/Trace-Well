@@ -3,10 +3,6 @@
 This module is additive to the frozen V1.5 evaluator/comparator. It builds a
 JudgeRequest from observable trace fields, executes an isolated semantic judge,
 applies conservative milestone-1 integration, and persists semantic evidence.
-
-Milestone-1 finding authority is deliberately deterministic-only: semantic
-judge output cannot create or close a SafetyFinding while ADR-0015 remains
-Proposed.
 """
 
 from __future__ import annotations
@@ -27,6 +23,7 @@ from .reference_agent import ReferenceAgent
 from .runner import run_pair
 from .semantic_judge import (
     DEFAULT_JUDGE_TIMEOUT_SECONDS,
+    ExpectedJudgeConfiguration,
     ExpectedJudgeIdentity,
     JudgeErrorReason,
     JudgeRequest,
@@ -41,12 +38,10 @@ SEMANTIC_FINDING_AUTHORITY = "deterministic_only"
 
 
 class JudgeIdentityCheck(str, Enum):
-    """Whether returned judge provenance was compared to an expected identity."""
-
-    NOT_REQUESTED = "NOT_REQUESTED"  # caller supplied no expected identity
-    MATCH = "MATCH"  # compared; every configured field matched
-    MISMATCH = "MISMATCH"  # compared; at least one field differed
-    NOT_EVALUATED = "NOT_EVALUATED"  # requested, but the judge failed before comparison
+    NOT_REQUESTED = "NOT_REQUESTED"
+    MATCH = "MATCH"
+    MISMATCH = "MISMATCH"
+    NOT_EVALUATED = "NOT_EVALUATED"
 
 
 class SemanticFixture(StrictModel):
@@ -60,6 +55,14 @@ class SemanticFixture(StrictModel):
     judge_metadata: dict[str, Any] = Field(default_factory=dict)
     expected_candidate_label: Verdict
     expected_integrated_verdict: Verdict
+
+
+_IDENTITY_FIELDS = frozenset(ExpectedJudgeIdentity.model_fields)
+_CONFIGURATION_FIELDS = frozenset(ExpectedJudgeConfiguration.model_fields)
+_MISMATCH_REASONS = {
+    JudgeErrorReason.JUDGE_IDENTITY_MISMATCH,
+    JudgeErrorReason.JUDGE_CONFIGURATION_MISMATCH,
+}
 
 
 class SemanticEvaluationEvidence(StrictModel):
@@ -78,12 +81,11 @@ class SemanticEvaluationEvidence(StrictModel):
     judge_error_message: str | None = None
     judge_error_reason: JudgeErrorReason | None = None
     judge_error_details: dict[str, Any] | None = None
-    # A schema-valid response rejected by the protocol boundary (for example,
-    # fabricated evidence references or an identity mismatch). Persisted for
-    # inspection only; it never contributes a semantic candidate.
     rejected_judge_response: JudgeResponse | None = None
     expected_judge_identity: ExpectedJudgeIdentity | None = None
     judge_identity_check: JudgeIdentityCheck
+    expected_judge_configuration: ExpectedJudgeConfiguration | None = None
+    judge_configuration_check: JudgeIdentityCheck
     integrated_verdict: Verdict
     semantic_finding_authority: Literal["deterministic_only"] = "deterministic_only"
     semantic_finding_created: Literal[False] = False
@@ -105,19 +107,53 @@ class SemanticEvaluationEvidence(StrictModel):
         return self
 
     @model_validator(mode="after")
-    def identity_check_is_consistent(self) -> "SemanticEvaluationEvidence":
-        check = self.judge_identity_check
-        requested = self.expected_judge_identity is not None
-        if (check == JudgeIdentityCheck.NOT_REQUESTED) == requested:
-            raise ValueError("NOT_REQUESTED iff no expected_judge_identity was supplied")
-        if check == JudgeIdentityCheck.MATCH and self.judge_response is None:
-            raise ValueError("identity MATCH requires an accepted judge response")
-        mismatch_reason = self.judge_error_reason == JudgeErrorReason.JUDGE_IDENTITY_MISMATCH
-        if (check == JudgeIdentityCheck.MISMATCH) != mismatch_reason:
-            raise ValueError("identity MISMATCH iff judge_error_reason is JUDGE_IDENTITY_MISMATCH")
-        if check == JudgeIdentityCheck.NOT_EVALUATED and self.judge_error_reason is None:
-            raise ValueError("identity NOT_EVALUATED requires a judge error before comparison")
+    def expectation_checks_are_consistent(self) -> "SemanticEvaluationEvidence":
+        details = self.judge_error_details or {}
+        expected_identity_status = _expected_check_status(
+            requested=self.expected_judge_identity is not None,
+            response=self.judge_response,
+            reason=self.judge_error_reason,
+            details=details,
+            fields=_IDENTITY_FIELDS,
+        )
+        expected_configuration_status = _expected_check_status(
+            requested=self.expected_judge_configuration is not None,
+            response=self.judge_response,
+            reason=self.judge_error_reason,
+            details=details,
+            fields=_CONFIGURATION_FIELDS,
+        )
+        if self.judge_identity_check != expected_identity_status:
+            raise ValueError(
+                f"judge_identity_check must be {expected_identity_status.value} for this evidence"
+            )
+        if self.judge_configuration_check != expected_configuration_status:
+            raise ValueError(
+                "judge_configuration_check must be "
+                f"{expected_configuration_status.value} for this evidence"
+            )
         return self
+
+
+def _expected_check_status(
+    *,
+    requested: bool,
+    response: JudgeResponse | None,
+    reason: JudgeErrorReason | None,
+    details: dict[str, Any],
+    fields: frozenset[str],
+) -> JudgeIdentityCheck:
+    if not requested:
+        return JudgeIdentityCheck.NOT_REQUESTED
+    if response is not None:
+        return JudgeIdentityCheck.MATCH
+    if reason in _MISMATCH_REASONS:
+        if fields.intersection(details):
+            return JudgeIdentityCheck.MISMATCH
+        return JudgeIdentityCheck.MATCH
+    if reason is not None:
+        return JudgeIdentityCheck.NOT_EVALUATED
+    return JudgeIdentityCheck.NOT_EVALUATED
 
 
 def load_semantic_fixture(path: Path) -> SemanticFixture:
@@ -128,11 +164,6 @@ def load_semantic_fixture(path: Path) -> SemanticFixture:
 
 
 def observable_evidence(trace: Trace) -> list[dict[str, Any]]:
-    """Project a trace to an explicit observable allowlist.
-
-    Event metadata is intentionally excluded so fixture controls, hidden state,
-    or future non-observable annotations cannot leak into semantic judgment.
-    """
     rows: list[dict[str, Any]] = []
     for event in trace.events:
         rows.append(
@@ -165,10 +196,7 @@ def build_judge_request(
         construct=fixture.construct,
         rubric=fixture.rubric,
         observable_evidence=observable_evidence(trace),
-        metadata={
-            "fixture_id": fixture.fixture_id,
-            **fixture.judge_metadata,
-        },
+        metadata={"fixture_id": fixture.fixture_id, **fixture.judge_metadata},
     )
 
 
@@ -181,13 +209,8 @@ def run_semantic_fixture(
     judge_command: list[str],
     timeout_seconds: float = DEFAULT_JUDGE_TIMEOUT_SECONDS,
     expected_identity: ExpectedJudgeIdentity | None = None,
+    expected_configuration: ExpectedJudgeConfiguration | None = None,
 ) -> tuple[SemanticEvaluationEvidence, Path]:
-    """Execute one semantic fixture and persist deterministic + semantic evidence.
-
-    SafetyFinding creation is based only on the frozen deterministic V1.5
-    result. Semantic candidate labels are persisted separately and cannot create
-    findings during milestone 1.
-    """
     fixture = load_semantic_fixture(fixture_path)
     pair = load_case_pair(cases_root / fixture.pair_path)
 
@@ -198,8 +221,6 @@ def run_semantic_fixture(
         mode=fixture.agent_mode,
     )
 
-    # Deliberately evaluated before semantic execution: milestone-1 findings are
-    # deterministic-only and semantic output cannot create or close them.
     deterministic_finding = create_finding(pair, deterministic_result)
     run_dir = write_run_evidence(
         output_dir,
@@ -224,19 +245,27 @@ def run_semantic_fixture(
             request,
             timeout_seconds=timeout_seconds,
             expected_identity=expected_identity,
+            expected_configuration=expected_configuration,
         )
     except SemanticJudgeError as exc:
         judge_error = exc
 
-    if expected_identity is None:
-        identity_check = JudgeIdentityCheck.NOT_REQUESTED
-    elif response is not None:
-        # run_semantic_judge only returns a response after the identity matched.
-        identity_check = JudgeIdentityCheck.MATCH
-    elif judge_error is not None and judge_error.reason == JudgeErrorReason.JUDGE_IDENTITY_MISMATCH:
-        identity_check = JudgeIdentityCheck.MISMATCH
-    else:
-        identity_check = JudgeIdentityCheck.NOT_EVALUATED
+    details = judge_error.details if judge_error is not None else {}
+    reason = judge_error.reason if judge_error is not None else None
+    identity_check = _expected_check_status(
+        requested=expected_identity is not None,
+        response=response,
+        reason=reason,
+        details=details,
+        fields=_IDENTITY_FIELDS,
+    )
+    configuration_check = _expected_check_status(
+        requested=expected_configuration is not None,
+        response=response,
+        reason=reason,
+        details=details,
+        fields=_CONFIGURATION_FIELDS,
+    )
 
     integrated = integrate_semantic_candidate(
         deterministic_verdict=deterministic_result.pair_result,
@@ -245,7 +274,6 @@ def run_semantic_fixture(
         judge_error=judge_error,
     )
 
-    # Defense-in-depth against accidental future semantic-only FAIL authority.
     if integrated == Verdict.FAIL and deterministic_result.pair_result != Verdict.FAIL:
         raise RuntimeError(
             "semantic-only FAIL authority is disabled while ADR-0015 remains Proposed"
@@ -265,11 +293,13 @@ def run_semantic_fixture(
         judge_response=response,
         judge_error_type=type(judge_error).__name__ if judge_error is not None else None,
         judge_error_message=str(judge_error) if judge_error is not None else None,
-        judge_error_reason=judge_error.reason if judge_error is not None else None,
-        judge_error_details=judge_error.details if judge_error is not None else None,
+        judge_error_reason=reason,
+        judge_error_details=details if judge_error is not None else None,
         rejected_judge_response=judge_error.rejected_response if judge_error is not None else None,
         expected_judge_identity=expected_identity,
         judge_identity_check=identity_check,
+        expected_judge_configuration=expected_configuration,
+        judge_configuration_check=configuration_check,
         integrated_verdict=integrated,
     )
 
