@@ -33,12 +33,22 @@ def main() -> int:
     else:
         label = "PASS"
 
+    if mode == "fabricated_ref":
+        evidence_refs = ["mock:fabricated:1"]
+    else:
+        # Cite only evidence supplied by the request.
+        evidence_refs = [
+            row["event_id"]
+            for row in request.get("observable_evidence", [])[:1]
+            if isinstance(row.get("event_id"), str)
+        ]
+
     response = {
         "request_id": response_request_id,
         "candidate_label": label,
         "observed_value": {"mock_mode": mode},
         "rationale": "deterministic mock semantic judgment",
-        "evidence_refs": ["mock:evidence:1"],
+        "evidence_refs": evidence_refs,
         "provenance": {
             "judge_id": "tracewell.mock-semantic-judge",
             "judge_version": "1",

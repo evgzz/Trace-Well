@@ -74,6 +74,40 @@ class SemanticJudgeProtocolError(SemanticJudgeError):
     pass
 
 
+class SemanticJudgeInvalidEvidenceReference(SemanticJudgeProtocolError):
+    """A schema-valid response cited evidence absent from the request.
+
+    The rejected response is retained so the fabricated references remain
+    inspectable; it must never be integrated as a semantic candidate.
+    """
+
+    reason = "INVALID_EVIDENCE_REFERENCE"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        response: JudgeResponse,
+        invalid_refs: list[str],
+    ) -> None:
+        super().__init__(message)
+        self.response = response
+        self.invalid_refs = invalid_refs
+
+
+def request_evidence_refs(request: JudgeRequest) -> set[str]:
+    """Return the closed set of references a judge response may cite."""
+    refs: set[str] = set()
+    for row in request.observable_evidence:
+        event_id = row.get("event_id")
+        if isinstance(event_id, str):
+            refs.add(event_id)
+        for ref in row.get("evidence_refs") or []:
+            if isinstance(ref, str):
+                refs.add(ref)
+    return refs
+
+
 def run_semantic_judge(
     command: list[str],
     request: JudgeRequest,
@@ -93,6 +127,11 @@ def run_semantic_judge(
         )
     except subprocess.TimeoutExpired as exc:
         raise SemanticJudgeTimeout("semantic judge timed out") from exc
+    except OSError as exc:
+        # Missing executable, permission denied, or other launch failure.
+        raise SemanticJudgeProtocolError(f"semantic judge failed to launch: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise SemanticJudgeProtocolError("semantic judge output is not valid UTF-8") from exc
 
     if proc.returncode != 0:
         raise SemanticJudgeProtocolError(
@@ -115,6 +154,15 @@ def run_semantic_judge(
 
     if response.request_id != request.request_id:
         raise SemanticJudgeProtocolError("semantic judge response request_id mismatch")
+
+    allowed_refs = request_evidence_refs(request)
+    invalid_refs = [ref for ref in response.evidence_refs if ref not in allowed_refs]
+    if invalid_refs:
+        raise SemanticJudgeInvalidEvidenceReference(
+            f"semantic judge cited evidence absent from the request: {invalid_refs}",
+            response=response,
+            invalid_refs=invalid_refs,
+        )
 
     return response
 

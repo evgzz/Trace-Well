@@ -9,9 +9,11 @@ from tracewell.models import Verdict
 from tracewell.semantic_judge import (
     DecodingDeterminismClass,
     JudgeRequest,
+    SemanticJudgeInvalidEvidenceReference,
     SemanticJudgeProtocolError,
     SemanticJudgeTimeout,
     integrate_semantic_candidate,
+    request_evidence_refs,
     run_semantic_judge,
 )
 
@@ -42,6 +44,7 @@ def test_mock_judge_returns_strict_response_with_determinism_class():
     assert response.provenance.decoding_determinism_class == DecodingDeterminismClass.DETERMINISTIC
     assert response.provenance.judge_id == "tracewell.mock-semantic-judge"
     assert response.request_id == "judge-req-1"
+    assert response.evidence_refs == ["e1"]
 
 
 def test_semantic_only_fail_does_not_gain_final_fail_authority():
@@ -162,3 +165,80 @@ def test_timeout_maps_to_review_and_timeout_type_is_distinct(tmp_path: Path):
             request("pass"),
             timeout_seconds=0.01,
         )
+
+
+def test_missing_judge_executable_is_protocol_error_and_maps_to_review(tmp_path: Path):
+    with pytest.raises(SemanticJudgeProtocolError, match="failed to launch") as excinfo:
+        run_semantic_judge([str(tmp_path / "missing-judge")], request("pass"))
+
+    verdict = integrate_semantic_candidate(
+        deterministic_verdict=Verdict.PASS,
+        specification_inconsistency=False,
+        judge_error=excinfo.value,
+    )
+    assert verdict == Verdict.REVIEW
+
+
+def test_non_executable_judge_is_protocol_error(tmp_path: Path):
+    judge = tmp_path / "not-executable-judge"
+    judge.write_text("#!/bin/sh\necho '{}'\n", encoding="utf-8")
+    judge.chmod(0o644)
+
+    with pytest.raises(SemanticJudgeProtocolError, match="failed to launch"):
+        run_semantic_judge([str(judge)], request("pass"))
+
+
+def test_non_utf8_judge_output_is_protocol_error(tmp_path: Path):
+    judge = tmp_path / "binary_judge.py"
+    judge.write_text(
+        "import sys\nsys.stdout.buffer.write(b'\\xff\\xfe')\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SemanticJudgeProtocolError, match="UTF-8"):
+        run_semantic_judge([sys.executable, str(judge)], request("pass"))
+
+
+def test_request_evidence_refs_is_closed_set_of_event_ids_and_refs():
+    judge_request = JudgeRequest(
+        request_id="r",
+        case_id="c",
+        trace_id="t",
+        construct="k",
+        rubric="r",
+        observable_evidence=[
+            {"event_id": "e1", "evidence_refs": ["ref:a", "ref:b"]},
+            {"event_id": "e2", "evidence_refs": []},
+        ],
+    )
+
+    assert request_evidence_refs(judge_request) == {"e1", "e2", "ref:a", "ref:b"}
+
+
+def test_fabricated_evidence_reference_is_rejected_not_discarded():
+    with pytest.raises(SemanticJudgeInvalidEvidenceReference) as excinfo:
+        run_semantic_judge(command(), request("fabricated_ref"))
+
+    error = excinfo.value
+    assert isinstance(error, SemanticJudgeProtocolError)
+    assert error.reason == "INVALID_EVIDENCE_REFERENCE"
+    assert error.invalid_refs == ["mock:fabricated:1"]
+    # The rejected response is retained for inspection, refs intact.
+    assert error.response.evidence_refs == ["mock:fabricated:1"]
+    assert error.response.candidate_label == Verdict.PASS
+
+
+def test_fabricated_evidence_reference_cannot_preserve_pass():
+    try:
+        run_semantic_judge(command(), request("fabricated_ref"))
+    except SemanticJudgeInvalidEvidenceReference as exc:
+        verdict = integrate_semantic_candidate(
+            deterministic_verdict=Verdict.PASS,
+            specification_inconsistency=False,
+            response=exc.response,
+            judge_error=exc,
+        )
+    else:  # pragma: no cover - the call above must raise
+        pytest.fail("fabricated evidence reference was accepted")
+
+    assert verdict == Verdict.REVIEW
