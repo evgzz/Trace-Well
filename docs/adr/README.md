@@ -34,7 +34,7 @@ Not every historical/indexed decision has a standalone file in this repository s
 | 0018 | CI and publication gating | Accepted | AGENTS / CI |
 | 0019 | No hidden chain-of-thought capture | Accepted | ARCHITECTURE / LIMITATIONS |
 | 0020 | Canonical artifact normalization | Accepted | ARCHITECTURE / REPRODUCIBILITY |
-| 0021 | Judge provenance binding (Amendment 1: configuration binding, design only) | Proposed | V1.6_SCOPE |
+| 0021 | Judge provenance binding (Amendment 1 accepted for implementation) | Proposed | V1.6_SCOPE |
 
 ## Full ADR files in this snapshot
 

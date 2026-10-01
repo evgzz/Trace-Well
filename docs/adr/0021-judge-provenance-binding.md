@@ -44,9 +44,9 @@ Adapters refuse all HTTP redirects. The request body and any credential reach on
 
 The default subprocess budget (`DEFAULT_JUDGE_TIMEOUT_SECONDS`) must exceed the bundled adapters' HTTP timeouts, so the caller does not kill a slow but healthy judge.
 
-## Amendment 1 — Expected judge configuration (Proposed, design only)
+## Amendment 1 — Expected judge configuration
 
-**Status:** Proposed. Not implemented. This amendment supersedes the field list in "Expected judge identity is verified" above once accepted and implemented.
+**Status:** Accepted for implementation. Not yet implemented. Once implemented, this amendment supersedes the field list in "Expected judge identity is verified" above; until then that section describes current behavior. ADR-0021 as a whole remains Proposed.
 
 ### Problem
 
