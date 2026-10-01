@@ -12,7 +12,9 @@ object to stdout.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+from pathlib import Path
 import os
 import sys
 from typing import Any
@@ -54,8 +56,16 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--inference-engine", required=True)
     value.add_argument("--inference-engine-version")
     value.add_argument("--quantization")
-    value.add_argument("--chat-template-digest")
-    value.add_argument("--rendered-prompt-digest")
+    value.add_argument(
+        "--chat-template-file",
+        type=Path,
+        help="Exact chat template served by the endpoint; the adapter records its sha256.",
+    )
+    value.add_argument(
+        "--rendered-prompt-file",
+        type=Path,
+        help="Exact rendered prompt for this request; the adapter records its sha256.",
+    )
     value.add_argument(
         "--decoding-determinism-class",
         required=True,
@@ -90,6 +100,27 @@ def _chat_url(base_url: str, *, allow_http: bool) -> str:
     return f"{trimmed}/v1/chat/completions"
 
 
+def _sha256_bytes(data: bytes) -> str:
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def _sha256_file(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    return _sha256_bytes(path.read_bytes())
+
+
+class _RefuseRedirect(request.HTTPRedirectHandler):
+    """Never follow redirects: the request body (and any credential) must only
+    reach the endpoint that was explicitly configured and validated."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise error.HTTPError(req.full_url, code, f"refusing redirect to {newurl}", headers, fp)
+
+
+_OPENER = request.build_opener(_RefuseRedirect)
+
+
 def _read_request() -> JudgeRequest:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -117,8 +148,11 @@ def _model_payload(judge_request: JudgeRequest, args: argparse.Namespace) -> dic
     return payload
 
 
-def _post(url: str, payload: dict[str, Any], *, token: str, timeout_seconds: float) -> dict[str, Any]:
-    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+def _encode(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _post(url: str, encoded: bytes, *, token: str, timeout_seconds: float) -> dict[str, Any]:
     http_request = request.Request(
         url,
         data=encoded,
@@ -129,7 +163,7 @@ def _post(url: str, payload: dict[str, Any], *, token: str, timeout_seconds: flo
         method="POST",
     )
     try:
-        with request.urlopen(http_request, timeout=timeout_seconds) as response:
+        with _OPENER.open(http_request, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8")
     except (error.URLError, TimeoutError) as exc:
         raise RuntimeError(f"HF dedicated endpoint request failed: {exc}") from exc
@@ -157,6 +191,8 @@ def _response(
     judge_request: JudgeRequest,
     model_output: dict[str, Any],
     args: argparse.Namespace,
+    *,
+    request_payload_digest: str,
 ) -> JudgeResponse:
     evidence_refs = model_output.get("evidence_refs", [])
     if not isinstance(evidence_refs, list) or not all(isinstance(item, str) for item in evidence_refs):
@@ -186,8 +222,9 @@ def _response(
             },
             judge_prompt_version=args.judge_prompt_version,
             rubric_version=args.rubric_version,
-            chat_template_digest=args.chat_template_digest,
-            rendered_prompt_digest=args.rendered_prompt_digest,
+            chat_template_digest=_sha256_file(args.chat_template_file),
+            rendered_prompt_digest=_sha256_file(args.rendered_prompt_file),
+            request_payload_digest=request_payload_digest,
         ),
         metadata={
             "adapter": "hf_inference_endpoint",
@@ -203,13 +240,19 @@ def main() -> int:
         if not token:
             raise ValueError(f"missing Hugging Face token in environment variable {args.token_env}")
         judge_request = _read_request()
+        encoded = _encode(_model_payload(judge_request, args))
         raw_response = _post(
             _chat_url(args.base_url, allow_http=args.allow_http_endpoint),
-            _model_payload(judge_request, args),
+            encoded,
             token=token,
             timeout_seconds=args.http_timeout_seconds,
         )
-        response = _response(judge_request, _extract_content(raw_response), args)
+        response = _response(
+            judge_request,
+            _extract_content(raw_response),
+            args,
+            request_payload_digest=_sha256_bytes(encoded),
+        )
     except Exception as exc:
         print(f"HF dedicated endpoint judge error: {exc}", file=sys.stderr)
         return 2

@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .models import StrictModel, Verdict
+from .semantic_judge import DecodingDeterminismClass
 
 
 class CalibrationLabel(StrictModel):
@@ -29,7 +30,7 @@ class JudgeCalibrationRecord(StrictModel):
     judge_version: str
     model: str | None = None
     model_revision: str | None = None
-    decoding_determinism_class: str
+    decoding_determinism_class: DecodingDeterminismClass
 
 
 class CalibrationPair(StrictModel):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,11 +16,15 @@ ADAPTER = ROOT / "scripts" / "hf_endpoint_judge.py"
 
 
 class Handler(BaseHTTPRequestHandler):
+    last_body: bytes = b""
+
     def do_POST(self):  # noqa: N802
         assert self.path == "/v1/chat/completions"
         assert self.headers["Authorization"] == "Bearer test-token"
         length = int(self.headers.get("Content-Length", "0"))
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        raw = self.rfile.read(length)
+        type(self).last_body = raw
+        payload = json.loads(raw.decode("utf-8"))
         assert payload["model"] == "endpoint-model"
         assert payload["temperature"] == 0.0
         content = {
@@ -60,7 +65,12 @@ def request_payload() -> JudgeRequest:
     )
 
 
-def run_adapter(base_url: str) -> subprocess.CompletedProcess[str]:
+def run_adapter(
+    base_url: str,
+    *,
+    chat_template: Path | None = None,
+    rendered_prompt: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
         str(ADAPTER),
@@ -80,12 +90,12 @@ def run_adapter(base_url: str) -> subprocess.CompletedProcess[str]:
         "unknown",
         "--rubric-version",
         "rubric-v1",
-        "--chat-template-digest",
-        "sha256:" + "a" * 64,
-        "--rendered-prompt-digest",
-        "sha256:" + "b" * 64,
         "--allow-http-endpoint",
     ]
+    if chat_template is not None:
+        command += ["--chat-template-file", str(chat_template)]
+    if rendered_prompt is not None:
+        command += ["--rendered-prompt-file", str(rendered_prompt)]
     env = {"HF_TOKEN": "test-token"}
     return subprocess.run(
         command,
@@ -97,13 +107,25 @@ def run_adapter(base_url: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_hf_endpoint_adapter_returns_strict_response():
+def sha256(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def test_hf_endpoint_adapter_returns_strict_response(tmp_path: Path):
+    template = tmp_path / "chat_template.jinja"
+    template.write_bytes(b"template-bytes")
+    rendered = tmp_path / "rendered_prompt.txt"
+    rendered.write_bytes(b"rendered-bytes")
     port = free_port()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        proc = run_adapter(f"http://127.0.0.1:{port}")
+        proc = run_adapter(
+            f"http://127.0.0.1:{port}",
+            chat_template=template,
+            rendered_prompt=rendered,
+        )
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -116,8 +138,10 @@ def test_hf_endpoint_adapter_returns_strict_response():
     assert response.provenance.model == "Qwen/Qwen2.5-0.5B-Instruct"
     assert response.provenance.model_revision == "rev-123"
     assert response.provenance.inference_engine == "vllm"
-    assert response.provenance.chat_template_digest == "sha256:" + "a" * 64
-    assert response.provenance.rendered_prompt_digest == "sha256:" + "b" * 64
+    assert response.provenance.chat_template_digest == sha256(b"template-bytes")
+    assert response.provenance.rendered_prompt_digest == sha256(b"rendered-bytes")
+    assert Handler.last_body
+    assert response.provenance.request_payload_digest == sha256(Handler.last_body)
 
 
 def test_hf_endpoint_adapter_requires_https_by_default():
@@ -149,3 +173,56 @@ def test_hf_endpoint_adapter_requires_https_by_default():
     )
     assert proc.returncode != 0
     assert "must use https" in proc.stderr
+
+
+def test_hf_endpoint_adapter_refuses_redirects_and_never_forwards_token():
+    class Target(BaseHTTPRequestHandler):
+        hits = 0
+        authorization_seen: list[str | None] = []
+
+        def _record(self):
+            type(self).hits += 1
+            type(self).authorization_seen.append(self.headers.get("Authorization"))
+            self.send_response(500)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = do_POST = _record  # urllib downgrades a followed 302 POST to GET
+
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+    target_port = free_port()
+    target = ThreadingHTTPServer(("127.0.0.1", target_port), Target)
+    target_thread = threading.Thread(target=target.serve_forever, daemon=True)
+    target_thread.start()
+
+    class Redirector(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.send_response(302)
+            self.send_header(
+                "Location", f"http://127.0.0.1:{target_port}/v1/chat/completions"
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+    redirector_port = free_port()
+    redirector = ThreadingHTTPServer(("127.0.0.1", redirector_port), Redirector)
+    redirector_thread = threading.Thread(target=redirector.serve_forever, daemon=True)
+    redirector_thread.start()
+    try:
+        proc = run_adapter(f"http://127.0.0.1:{redirector_port}")
+    finally:
+        for server, thread in ((redirector, redirector_thread), (target, target_thread)):
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
+    # The bearer token never reaches the redirect target.
+    assert Target.authorization_seen == []
+    assert Target.hits == 0
+    assert proc.returncode != 0
+    assert "refusing redirect" in proc.stderr

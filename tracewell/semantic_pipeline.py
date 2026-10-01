@@ -25,6 +25,8 @@ from .models import StrictModel, Trace, Verdict
 from .reference_agent import ReferenceAgent
 from .runner import run_pair
 from .semantic_judge import (
+    DEFAULT_JUDGE_TIMEOUT_SECONDS,
+    ExpectedJudgeIdentity,
     JudgeRequest,
     JudgeResponse,
     SemanticJudgeError,
@@ -145,7 +147,8 @@ def run_semantic_fixture(
     output_dir: Path,
     run_id: str,
     judge_command: list[str],
-    timeout_seconds: float = 5.0,
+    timeout_seconds: float = DEFAULT_JUDGE_TIMEOUT_SECONDS,
+    expected_identity: ExpectedJudgeIdentity | None = None,
 ) -> tuple[SemanticEvaluationEvidence, Path]:
     """Execute one semantic fixture and persist deterministic + semantic evidence.
 
@@ -188,6 +191,7 @@ def run_semantic_fixture(
             judge_command,
             request,
             timeout_seconds=timeout_seconds,
+            expected_identity=expected_identity,
         )
     except SemanticJudgeError as exc:
         judge_error = exc

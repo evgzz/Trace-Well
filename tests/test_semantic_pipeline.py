@@ -9,7 +9,7 @@ import yaml
 from pydantic import ValidationError
 
 from tracewell.models import EventType, Trace, Verdict
-from tracewell.semantic_judge import DecodingDeterminismClass
+from tracewell.semantic_judge import DecodingDeterminismClass, ExpectedJudgeIdentity
 from tracewell.semantic_pipeline import (
     SEMANTIC_FINDING_AUTHORITY,
     SemanticEvaluationEvidence,
@@ -238,3 +238,22 @@ def test_rejected_and_accepted_judge_responses_cannot_coexist(tmp_path: Path):
     rejected_without_reason = {**payload, "judge_error_reason": None}
     with pytest.raises(ValidationError, match="requires a judge_error_reason"):
         SemanticEvaluationEvidence.model_validate(rejected_without_reason)
+
+
+
+def test_judge_identity_mismatch_is_review_with_complete_evidence_package(tmp_path: Path):
+    evidence, run_dir = run_semantic_fixture(
+        SEMANTIC_CASES / "sem-001-pass.yaml",
+        cases_root=CASES,
+        output_dir=tmp_path / "runs",
+        run_id="semantic-identity-mismatch",
+        judge_command=judge_command(),
+        expected_identity=ExpectedJudgeIdentity(judge_id="tracewell.expected-judge"),
+    )
+
+    assert evidence.deterministic_pair_verdict == Verdict.PASS
+    assert evidence.judge_response is None
+    assert evidence.judge_error_type == "SemanticJudgeProvenanceMismatch"
+    assert "judge_id" in evidence.judge_error_message
+    assert evidence.integrated_verdict == Verdict.REVIEW
+    assert (run_dir / "semantic_result.json").is_file()

@@ -7,7 +7,10 @@ import pytest
 
 from tracewell.models import Verdict
 from tracewell.semantic_judge import (
+    DEFAULT_JUDGE_TIMEOUT_SECONDS,
     DecodingDeterminismClass,
+    ExpectedJudgeIdentity,
+    SemanticJudgeProvenanceMismatch,
     JudgeRequest,
     SemanticJudgeInvalidEvidenceReference,
     SemanticJudgeProtocolError,
@@ -242,3 +245,66 @@ def test_fabricated_evidence_reference_cannot_preserve_pass():
         pytest.fail("fabricated evidence reference was accepted")
 
     assert verdict == Verdict.REVIEW
+
+
+
+MOCK_IDENTITY = ExpectedJudgeIdentity(
+    judge_id="tracewell.mock-semantic-judge",
+    judge_version="1",
+    decoding_determinism_class=DecodingDeterminismClass.DETERMINISTIC,
+    judge_prompt_version="mock-v1",
+    rubric_version="mock-rubric-v1",
+)
+
+
+def test_matching_expected_identity_is_accepted():
+    response = run_semantic_judge(command(), request("pass"), expected_identity=MOCK_IDENTITY)
+
+    assert response.candidate_label == Verdict.PASS
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_value"),
+    [
+        ("judge_id", "tracewell.some-other-judge"),
+        ("judge_version", "2"),
+        ("model", "expected-model"),
+        ("decoding_determinism_class", DecodingDeterminismClass.SEEDED_STOCHASTIC),
+        ("rubric_version", "rubric-v2"),
+    ],
+)
+def test_provenance_identity_mismatch_is_protocol_error(field, expected_value):
+    expected = MOCK_IDENTITY.model_copy(update={field: expected_value})
+
+    with pytest.raises(SemanticJudgeProvenanceMismatch) as excinfo:
+        run_semantic_judge(command(), request("pass"), expected_identity=expected)
+
+    error = excinfo.value
+    assert isinstance(error, SemanticJudgeProtocolError)
+    assert error.reason == "JUDGE_IDENTITY_MISMATCH"
+    assert list(error.mismatches) == [field]
+    assert error.response.candidate_label == Verdict.PASS
+
+
+def test_provenance_identity_mismatch_cannot_preserve_pass():
+    expected = MOCK_IDENTITY.model_copy(update={"model_revision": "pinned-rev"})
+    with pytest.raises(SemanticJudgeProvenanceMismatch) as excinfo:
+        run_semantic_judge(command(), request("pass"), expected_identity=expected)
+
+    verdict = integrate_semantic_candidate(
+        deterministic_verdict=Verdict.PASS,
+        specification_inconsistency=False,
+        judge_error=excinfo.value,
+    )
+    assert verdict == Verdict.REVIEW
+
+
+def test_default_judge_timeout_exceeds_bundled_adapter_http_timeouts():
+    import importlib.util
+
+    for name in ("local_openai_compatible_judge", "hf_endpoint_judge"):
+        spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        http_timeout = module.parser().get_default("http_timeout_seconds")
+        assert DEFAULT_JUDGE_TIMEOUT_SECONDS > http_timeout, name
