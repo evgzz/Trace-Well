@@ -75,6 +75,38 @@ Hosted dedicated-endpoint runs are `transport_only` by default. They become cali
 
 Unavailable hosted provenance must remain unavailable. TRACE-Well must not substitute locally inferred template/rendered-prompt values and describe them as server-observed execution evidence.
 
+### Semantic-judge provider strategy
+
+TRACE-Well separates **evaluation semantics** from **model transport**. A Hugging Face Inference Endpoint, a local/self-hosted server, or a future model gateway such as OpenRouter is a runtime implementation behind the `semantic_judge` capability; none changes the deterministic evaluator's precedence rules or becomes ground truth.
+
+| Path | Intended role | Evidence posture |
+|---|---|---|
+| **HF Inference Endpoint** | Managed, no-self-host execution for a pinned candidate judge | Strongest hosted candidate when the canonical model, immutable Hub revision, generation configuration, and sufficient runtime/template evidence can be bound to the run. If required provenance is unavailable, the run remains `transport_only`. |
+| **Local/self-hosted OpenAI-compatible server** | Highest-control reference and qualification-style execution | Preferred when exact model artifact, weights digest, inference engine/version, quantization, chat template, rendered prompt, and generation parameters must be directly observed and recorded. |
+| **OpenRouter** | Exploratory multi-model judge matrix and cross-model/provider sensitivity analysis | **Proposed research path; not currently implemented in `main`.** Useful for rapidly comparing candidate judges through a common API, but default provider routing/fallback can introduce execution-path variability. Controlled runs would need the model/provider/quantization constrained, fallbacks disabled, request parameters pinned, and routing/provenance metadata captured. Incomplete provenance keeps the result research/transport evidence rather than qualification evidence. |
+
+The preferred workflow is therefore:
+
+```text
+OpenRouter or equivalent gateway
+        ↓
+rapid multi-model judge comparison
+        ↓
+blinded calibration against independent human/domain-expert labels
+        ↓
+select candidate judge(s)
+        ↓
+pinned HF Endpoint or local/self-hosted execution
+        ↓
+JudgeResponse + identity/configuration provenance checks
+        ↓
+existing TRACE-Well evaluator precedence
+```
+
+A useful related pattern is [Synthetic Hospital](https://github.com/sparkcpark/synthetic_hospital): models are accessed through OpenRouter while the benchmark's reported task scores are computed by deterministic scoring logic. TRACE-Well preserves the same separation between **model access** and **scoring authority**, but adds an isolated semantic-judge layer only for obligations that cannot be resolved mechanically from observable evidence.
+
+If an OpenRouter adapter is added later, it must conform to the existing `JudgeRequest` / `JudgeResponse` protocol, preserve ADR-0017 isolation and ADR-0021 provenance binding, and must not alter the frozen V1.5 deterministic claims or verdict precedence.
+
 ### Serving-engine policy
 
 The initial study adds serving paths only to answer a specific provenance or reproducibility question.
