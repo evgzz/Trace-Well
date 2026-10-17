@@ -35,6 +35,7 @@ Not every historical/indexed decision has a standalone file in this repository s
 | 0019 | No hidden chain-of-thought capture | Accepted | ARCHITECTURE / LIMITATIONS |
 | 0020 | Canonical artifact normalization | Accepted | ARCHITECTURE / REPRODUCIBILITY |
 | 0021 | Judge provenance binding (Amendment 1 accepted and implemented) | Proposed | V1.6_SCOPE |
+| 0022 | τ³ experimental boundary and evidence-producer contract | Proposed | ENGINEERING_CONTEXT / TAU3_TEST_SOURCE_AUDIT |
 
 ## Full ADR files in this snapshot
 
@@ -46,3 +47,4 @@ Not every historical/indexed decision has a standalone file in this repository s
 - `0019-no-hidden-chain-of-thought.md`
 - `0020-canonical-artifact-normalization.md`
 - `0021-judge-provenance-binding.md` — Proposed
+- `0022-tau3-experimental-boundary.md` — Proposed
