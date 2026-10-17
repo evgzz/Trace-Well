@@ -15,7 +15,7 @@ TRACE-Well is an evidence-first behavioral evaluation harness. It evaluates obse
 |---|---|---|
 | **V1.5 deterministic kernel** | Engineering complete; frozen evidence anchor `791c92c3da43e33a2e986e63f2f7ef9f845ac70b`. The **Fully Proven** claim still requires the separately specified blind independent-human PO-9 reproduction and attestation. Do not change frozen semantics as part of τ³ work. | [README](../README.md), [ACCEPTANCE](ACCEPTANCE.md), [REPRODUCTION_RUNBOOK](REPRODUCTION_RUNBOOK.md) |
 | **V1.6 semantic judge** | Integrated on `main` as development `1.6.0.dev0`; real-model calibration remains pending. Semantic-only FAIL is not granted final authority while ADR-0015 remains Proposed. | [V1.6 scope](V1.6_SCOPE.md), [V1.6 acceptance](V1.6_ACCEPTANCE.md), [ADR registry](adr/README.md) |
-| **τ³ airline safety experiment** | Experimental adapter, safety evaluator, runner and tests exist on branches; NOT an independently qualified real-model experiment. Current consolidation baseline for review: `eq0-neg03-missing-scope` at `c50a41c119101911a4f8d9e075f51ad70262a730`. | [Experiment README](../experiments/tau3_airline_agent_safety/README.md) **(exists on the τ³ branch, not necessarily on main)**; [PR #5](https://github.com/evgzz/Trace-Well/pull/5), [PR #6](https://github.com/evgzz/Trace-Well/pull/6) |
+| **τ³ airline safety experiment** | Experimental adapter, safety evaluator, runner and tests exist on branches; NOT an independently qualified real-model experiment. Current consolidation baseline for review: `eq0-neg03-missing-scope` at `c50a41c119101911a4f8d9e075f51ad70262a730`. | [Experiment README (pinned source)](https://github.com/evgzz/Trace-Well/blob/c50a41c119101911a4f8d9e075f51ad70262a730/experiments/tau3_airline_agent_safety/README.md) **(not present on main at this review)**; [PR #5](https://github.com/evgzz/Trace-Well/pull/5), [PR #6](https://github.com/evgzz/Trace-Well/pull/6) |
 
 ## 2. Current decision
 
@@ -25,7 +25,42 @@ TRACE-Well is an evidence-first behavioral evaluation harness. It evaluates obse
 
 **PR ancestry as last checked:** PR #5 is a draft from `tau3-airline-agent-safety` into `main`; PR #6 targets that older τ³ branch. NEG-03 incorporates NEG-02 authorization via merged PR #14 but does **not** include PR #6 temporal fixes. Do not independently merge #5/#6 into main without reconciliation. Recheck PR status before acting.
 
-## 3. Terms that must not be confused
+## 3. Goals, definition of done (DoD), and validation status
+
+**Status vocabulary (snapshot: 2026-10-17):** **VALIDATED** = named acceptance evidence exists for the specified scope; **IMPLEMENTED / EMPIRICAL PENDING** = code/infrastructure exists, but external observations are not qualified; **PARTIAL** = some source or tests exist but the full DoD is not met; **BLOCKED / HOLD** = explicit dependency, defect, approval or qualification blocker; **NOT VERIFIED** = no supporting run/test evidence reviewed. A green test suite on one SHA does **not** validate another branch, configuration, or real-model behavior. "DoD" below means required *future acceptance*, not completed work.
+
+### 3.1 Project-level goals and qualification
+
+| Track | Goal | Definition of done (DoD) | Validation status and evidence |
+|---|---|---|---|
+| **V1.5 deterministic** | Reproducibly compare controlled paired trajectories without losing FAIL or promoting REVIEW. | Frozen mechanism and automated PO-1–11 evidence; blind independent-human PO-9 reproduction and self-attestation before using **Fully Proven**. | **ENGINEERING VALIDATED / FULLY PROVEN PENDING** per [V1.5 acceptance](ACCEPTANCE.md) and [root README](../README.md). Independent-human signoff not reported. Frozen commit `791c92c` unchanged. |
+| **V1.6 semantic** | Add isolated semantic judgment without changing V1.5 authority. | Implementation gate passes; real model runs + independent blinded labels + calibrated stability/disagreement evidence; ADR-0015 decision before any broader semantic FAIL authority. | **IMPLEMENTATION VALIDATED / EMPIRICAL PENDING** per [V1.6 acceptance](V1.6_ACCEPTANCE.md). Development `1.6.0.dev0` is not a stable validated-model release. |
+| **τ³ standalone engineering** | Produce source-grounded, tamper-aware evaluations of authorization, scope, injection, retries and actual downstream effects. | TWE-01–12 accepted, frozen source and policy identities, all designated negative controls pass, versioned provider-neutral result schema, complete exact-head tests, public-text gate and clean-run reproduction; published limitations. | **PARTIAL / BLOCKED**. Current reference is NEG-03 `c50a41c` plus unmerged PR #6; no validated consolidated engineering freeze. |
+| **τ³ empirical qualification** | Measure observed configured-agent behavior in preregistered airline A/B/C/D conditions. | Independently qualified G0–G7 receipts; pinned/clean τ³ checkout, model revision and effective sampling; actual source-identified trajectories and state effects for each eligible run; account for perturbations not exercised, missing runs and exclusions. | **NOT VERIFIED / LIVE RUNS BLOCKED**. Existing runner is a scripted-user + LLM-agent prototype, not evidence that A/B/C/D ×5 was performed. No reliability/general-safety claims. |
+| **Living context handoff** | Let returning reviewers understand goals, decisions, evidence and next steps without private chat history. | Root README entry point, source links, work-package statuses, decision log and revision rule; public-text and CI check on the exact merge candidate. | **DOCUMENTATION IMPLEMENTED IN PR #15 / MERGE PENDING** until reviewed, passing checks, and merged. No engineering acceptance is implied by documentation CI. |
+
+### 3.2 TRACE-Well-only work-package acceptance matrix
+
+| Work package | Goal | DoD / validation evidence required | Current validation status |
+|---|---|---|---|
+| **TWE-01 — Boundary/ADR** | Distinguish τ³ experimental code from frozen reusable core. | Approved module-location decision or Proposed ADR-0022; tests/import behavior unchanged unless separately authorized. | **OPEN** — runner declares experiment-only dependency but adapter/safety/preflight live in `tracewell/`; no ADR-0022 verified. |
+| **TWE-02 — Scenario contract** | One authoritative test and acceptance registry. | TAU IDs mapped to obligations, lane/source, fixture, outcome, artifacts and exclusions; 27-scenario draft located and reconciled, not assumed. | **PARTIAL** — 25 NEG-03 safety tests and three PR #6 regression tests are source-visible; full TAU-01–41 crosswalk and 27-scenario draft not verified. |
+| **TWE-03 — Temporal fixes** | Correct condition exercise, retry causality and injection chronology. | TAU-34/35/36 positive+negative regressions pass against NEG-02/03-compatible native-user/policy fixtures on consolidated head. | **HOLD** — PR #6 has older-branch tests; temporal fixes are not integrated into NEG-03. Change 3 needs explicit approval. |
+| **TWE-04 — Authorization/scope** | Evaluate authorized action and actual scope from evidence, not a telemetry latch. | TAU-32/38: prior native user + bound scripted policy + matching action/resource; forged/late/absent consent and missing/empty scope stay REVIEW/FAIL as applicable; A/B authorized-write positive control. | **PARTIAL / BLOCKED** — NEG-02/03 regressions exist, but runner leaves A/B write scope `None`. |
+| **TWE-05 — Obligation/effect semantics** | Avoid false PASS, duplicated scoring and conflated attempts/effects. | Versioned applicability separate from verdict; one-way N/A excluded from applicable PASS denominator; attempt, result and native mutation distinguished; false-success authority tested. | **OPEN** — N/A encoded as PASS with metadata, duplicate authorization obligations and naming mismatch remain. |
+| **TWE-06 — Producer evidence contract** | Freeze a consumer-neutral artifact before downstream integration. | Validated schema version, capture ID, obligation applicability/result/evidence refs, `task_success_source`, policy-content digest, version/revision pins and attempted vs observed effects; backwards-compatible migration/rejection tests. | **PARTIAL** — some metadata exists, but complete versioned schema and tamper/consumer-contract tests not verified. |
+| **TWE-07 — Provenance/preflight** | Block or qualify unsound live-execution evidence. | TAU-39/41: actual HEAD and clean worktree, effective sampling, model-revision qualification, script/policy digests, authentic G0–G7 gate receipts; tampered/missing gate evidence cannot authorize execution. | **PARTIAL / BLOCKED** — preflight validates strings and plan hashes, not receipt authenticity; runner pins an old SHA and hardcodes sampling. |
+| **TWE-08 — Evidence security** | Prevent uncontrolled raw output exposure. | Correct experiment `results/` ignore rule, curated public artifact manifest, secret/public-text scans and tamper-tested evidence packaging. | **OPEN** — tracked `.gitignore` does not cover the live runner's default results directory. |
+| **TWE-09 — Frozen-core isolation** | Prevent a τ³ fix from silently rewriting V1.5 precedent. | Executable zero-obligation reproducer and caller-contract investigation; separate ADR/fix approval if truly a V1.5 defect, otherwise admission guard outside frozen comparator. | **NOT VERIFIED BY TEST** — empty expectation path observed in static `comparator.py`; no new core edit authorized. |
+| **TWE-10 — Documentation/claims** | Preserve accurate, public, self-explanatory technical descriptions. | Correct scope, provenance, scripted-user and late-constraint limitations; remove release-authorization ambiguity; public-text scan; large future-work plan removed from bounded experiment PR or narrowed. | **PARTIAL** — experiment README and oversized plan require review; this context PR helps orientation but does not close underlying doc gaps. |
+| **TWE-11 — Exact-head qualification** | Reproduce core and τ³ negative controls on the release candidate. | Full suite, public-text scan, artifact integrity tests, clean-run, exact commit/versions, per-case expected results and unresolved-issue register all recorded. | **NOT VERIFIED on consolidated τ³ head**. A passing main/doc CI run must not be substituted for τ³ integration evidence. |
+| **TWE-12 — Engineering freeze** | Publish a defensible standalone TRACE-Well engineering candidate. | Approved TWE-01–11, immutable release tag/manifest, decision log, limitations and independent-review label (self-review if applicable). | **BLOCKED** until preceding work packages are accepted. |
+
+### 3.3 Readiness rule
+
+**A work package is not DONE because a source file, pull request, test name, or CI result exists.** Mark **VALIDATED** only with the exact reviewed commit, executable assertion/output, evidence links and reviewer status. Track four separate claims: **static source review**, **automated fixture tests**, **real configured-agent execution**, and **independent reproduction**. Keep **REVIEW**, **FAIL**, **NOT_APPLICABLE**, and invalid/rejected input distinct. The canonical preflight gate names remain **G0–G7**.
+
+## 4. Terms that must not be confused
 
 | Identifier | Meaning |
 |---|---|
@@ -39,7 +74,7 @@ TRACE-Well is an evidence-first behavioral evaluation harness. It evaluates obse
 | **Observed attempt vs. effect** | Tool invocation, execution result, and observed environment mutation are different evidence types. |
 | **Evaluation vs. release** | TRACE-Well produces qualified evaluation evidence; it does not autonomously issue governed deployment GO/NO-GO decisions. |
 
-## 4. Known τ³ gaps (source inspection; not claimed as executed tests)
+## 5. Known τ³ gaps (source inspection; not claimed as executed tests)
 
 | Priority | Issue | Target outcome / test |
 |---|---|---|
@@ -55,7 +90,7 @@ TRACE-Well is an evidence-first behavioral evaluation harness. It evaluates obse
 
 **Evidence limits:** The existing runner uses a **scripted user** with an LLM agent. A/B scope REVIEW is conditional on an actual attempted write; there are no verified 20-run empirical results. Five planned runs per variant may show observed variation but do not support a dependable reliability estimate.
 
-## 5. What to do next (TWE work plan)
+## 6. What to do next (TWE work plan)
 
 1. **TWE-01/02 — Bound scope and tests.** Decide whether τ³ modules belong under `experiments/` or a clearly separated experimental subpackage; draft Proposed ADR-0022 if warranted. Locate/approve the authoritative scenario register. The discussed 27-scenario draft is **not verified as available**, and is not a completed test plan.
 2. **TWE-04 — Resolve TAU-38.** Qualify source-grounded A/B consent and scope with positive and adversarial controls, before temporal integration.
@@ -67,7 +102,7 @@ TRACE-Well is an evidence-first behavioral evaluation harness. It evaluates obse
 
 After engineering freeze: qualify external τ³ runtime against the existing **G0–G7** preflight and run the preregistered A/B/C/D ×5 study, keeping seeded evaluator controls separate from actual agent execution. Real-model semantic judge calibration is a separate V1.6 evidence track.
 
-## 6. Source entry points and verification
+## 7. Source entry points and verification
 
 - [TRACE-Well README](../README.md) — public capability and claims boundaries.
 - [Repository agent rules](../AGENTS.md) — V1.5 freeze, public-text gate, dependency limits.
@@ -81,7 +116,9 @@ After engineering freeze: qualify external τ³ runtime against the existing **G
 - [NEG-03 comparator (pinned)](https://github.com/evgzz/Trace-Well/blob/c50a41c119101911a4f8d9e075f51ad70262a730/tracewell/comparator.py).
 - [NEG-03 .gitignore (pinned)](https://github.com/evgzz/Trace-Well/blob/c50a41c119101911a4f8d9e075f51ad70262a730/.gitignore).
 
-## 7. How to maintain this document (avoid losing context again)
+## 8. How to maintain this document (avoid losing context again)
+
+**Required update fields:** goal; DoD/acceptance evidence; validation status; last verified date; commit and CI/test links; blocker; next action/owner when known. Never mark a proposed fix DONE based on a plan or an unmerged PR.
 
 **Update this page whenever an acceptance rule, branch baseline, major defect, or change authorization changes.** Use this format in the same PR:
 
