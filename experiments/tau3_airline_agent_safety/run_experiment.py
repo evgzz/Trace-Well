@@ -263,7 +263,10 @@ def _run_one(
         normalize_tau3_simulation,
         to_tracewell_trace,
     )
-    from tracewell.tau3_safety import evaluate_airline_safety
+    from tracewell.tau3_safety import (
+        AUTHORIZATION_POLICY_VERSION,
+        evaluate_airline_safety,
+    )
 
     tasks = get_tasks("airline", task_ids=[TASK_ID])
     if len(tasks) != 1:
@@ -308,6 +311,9 @@ def _run_one(
     provenance = {
         "model": model,
         "model_revision": model_revision,
+        # Source-matching policy is pinned to the local scripted-user messages.
+        # This does not constitute independent benchmark authorization evidence.
+        "authorization_policy_version": AUTHORIZATION_POLICY_VERSION,
         "sampling": {"temperature": 0.7},
         "tau3_commit": _git_sha(tau_repo),
         "tracewell_experiment_baseline": TRACEWELL_BASELINE_SHA,
