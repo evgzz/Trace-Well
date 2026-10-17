@@ -1,5 +1,7 @@
 # TRACE-Well
 
+> **Returning to this project?** Read the [living engineering context and current τ³ next steps](docs/ENGINEERING_CONTEXT.md) before editing. It distinguishes frozen evidence, pending decisions, known evaluator issues and repository-resume rules.
+
 TRACE-Well is an open-source paired/counterfactual behavioral evaluation harness. The frozen V1.5 deterministic evidence base remains intact, while `main` now contains integrated V1.6 semantic-judge development infrastructure.
 
 The deterministic core tests whether an agent makes a required behavioral change, preserves required invariants, and whether a configured mitigation survives both sides of the counterfactual using explicit, inspectable evidence.
