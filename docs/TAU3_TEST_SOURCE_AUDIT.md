@@ -9,7 +9,7 @@
 
 TRACE-Well needs an independently readable crosswalk between safety scenarios, source authority, actual executable tests, expected outcomes and remaining defects. A test *function* is not a TAU *scenario*. Neither a code review nor a passing fixture test proves real configured-agent execution, a valid release decision, or independent reproduction.
 
-**Assistant-run local verification report and crosswalk summary (not attached or committed in inspected sources):** 42 scenario entries including TAU-06a and TAU-06b separately. An assistant-run local verification on 2026-10-17 in a clone at `c50a41c` reported that 33 distinct referenced tests pass at NEG-03 `c50a41c`; six separately drafted `strict-xfail` tests for TAU-13, 15, 21, 31, 38, 41 showed XFAIL in that local check; 38 existing τ³ tests passed in that local check. These are **reported results from an assistant-run local verification dated 2026-10-17**, not independently rerun or verified from logs by this PR author. Do not describe these as owner-verified. The full 42-row mapping, six XFAIL test bodies, logs and commit state were **not provided to this audit**. The follow-up review names `TAU_ACCEPTANCE_CROSSWALK.md`, a companion CSV, and `test_tau_xfail_draft.py` as existing in an external clone; those files were **not found in the connected GitHub branch or accessible chat files** on this review. They must be imported unchanged from their actual source, not guessed or recreated. Do not replace that artifact with assumptions based on matching names.
+**Assistant-run local verification report and crosswalk summary (not attached or committed in inspected sources):** 42 scenario entries including TAU-06a and TAU-06b separately. An assistant-run local verification on 2026-10-17 in a clone at `c50a41c` reported that 33 distinct referenced tests pass at NEG-03 `c50a41c`; six separately drafted `strict-xfail` tests for TAU-13, 15, 21, 31, 38, 41 showed XFAIL in that local check; 38 existing τ³ tests passed in that local check. These are **reported results from an assistant-run local verification dated 2026-10-17**, not independently rerun or verified from logs by this PR author. Do not describe these as owner-verified. The 42-row Markdown and CSV crosswalks are now imported as `docs/TAU3_ACCEPTANCE_CROSSWALK.md` and `.csv` from the supplied reviewer archive. The six strict-XFAIL test bodies are present in that archive but intentionally **not included in this main-based documentation PR**: `tracewell.tau3_*` is absent on `main`, so these tests belong on an authorized consolidated branch. Logs were not independently rerun by this PR author. The follow-up review names `TAU_ACCEPTANCE_CROSSWALK.md`, a companion CSV, and `test_tau_xfail_draft.py` as existing in an external clone; those files were **supplied in the review archive; only the two docs were imported into this main-based PR** on this review. They must be imported unchanged from their actual source, not guessed or recreated. Do not replace that artifact with assumptions based on matching names.
 
 **Actual source inventory, inspected at pinned commits:** 25 safety tests, 9 adapter tests, 4 preflight tests on NEG-03 (**38 total**), plus **3 PR #6 regression tests** from a different ref. **41 inspected named test functions across two refs is not equal to 42 mapped scenarios**, and they are not co-located at a validated consolidated head.
 
@@ -98,7 +98,7 @@ Every row is reportedly **no live runs and no independent reproduction**; S (sta
 
 | Unmapped issue | Assistant-run review finding | Proposed owner |
 |---|---|---|
-| V1.5 empty-expectation PASS | Reproduced via `compare_pair` and `tracewell run-pair` per owner. Preserve frozen V1.5; attach exact repro and evaluate admission guard or separately governed core fix. | TWE-09 |
+| V1.5 empty-expectation PASS | Reproduced via `compare_pair` and `tracewell run-pair` per assistant-run local review (2026-10-17 at `c50a41c`); not independently rerun by this PR author. Preserve frozen V1.5; attach exact repro and evaluate admission guard or separately governed core fix. | TWE-09 |
 | Output directory not ignored | `.gitignore` on NEG-03 has `results/runs/*`, not runner default `experiments/tau3_airline_agent_safety/results/`. | TWE-08 |
 | Experiment README release vocabulary | GO/NO-GO language may imply release authority outside TRACE-Well. | TWE-10 |
 | Stale integration baseline | NEG-03 diverged from `main` (see below). | TWE-11 |
@@ -118,14 +118,14 @@ Do **not** conflate green CI on `main`, tests on NEG-03, or PR #6 fixtures with 
 - [x] Inspect and pin existing named-test sources across NEG-03 and PR #6.
 - [x] Capture the assistant-run review's 42-row status totals and known crosswalk conflicts without implying file access.
 - [x] List six assistant-reported XFAILs and no-live/no-independent-evidence qualifications.
-- [ ] Obtain the **actual authoritative 42-row TAU crosswalk**, including TAU-06a/06b; confirm every row's test function, lane, expected verdict, control source, reviewer and evidence.
-- [ ] Obtain the six strict-XFAIL files and CI/test logs; register precise tests/expected outcomes rather than claim already integrated.
+- [x] Import the full 42-row Markdown and CSV crosswalk, including TAU-06a/06b, from supplied reviewer files. Mapping and expected authority decisions remain draft, not accepted.
+- [x] Receive the six strict-XFAIL test source in the review archive. **Not committed here** due to imports unavailable on `main`. Install on an authorized consolidated τ³ branch, verify exact-head fixture outcomes, and link CI logs before marking validated.
 - [ ] Approve decisions D9 authority, D10 schema acceptance, TAU-30, TAU-33, TAU-38 and TWE-01.
 - [ ] Attach an executable acceptance matrix to the eventual consolidated exact SHA.
 - [ ] Verify all outstanding NEEDS TEST controls and ensure defects do not become PASS under missing evidence.
 - [ ] Admit or explicitly defer consumer-side controls without implementing a consumer dependency.
 
-**TWE-02 validation: PARTIAL, not DONE.** The reported six-XFAIL results do not constitute passing production acceptance tests: strict-XFAIL records a known defect until repaired and converted to positive passing regressions. No evaluator code modified; Change 3 remains HOLD.
+**TWE-02 validation: DOCUMENTATION IMPORTED / ACCEPTANCE STILL PARTIAL, not DONE.** The reported six-XFAIL results do not constitute passing production acceptance tests: strict-XFAIL records a known defect until repaired and converted to positive passing regressions. No evaluator code modified; Change 3 remains HOLD.
 
 ## Source fingerprints
 
