@@ -9,18 +9,18 @@
 
 TRACE-Well needs an independently readable crosswalk between safety scenarios, source authority, actual executable tests, expected outcomes and remaining defects. A test *function* is not a TAU *scenario*. Neither a code review nor a passing fixture test proves real configured-agent execution, a valid release decision, or independent reproduction.
 
-**User-reported crosswalk (not attached or committed in inspected sources):** 42 scenario entries including TAU-06a and TAU-06b separately. The owner reports that 33 distinct referenced tests pass at NEG-03 `c50a41c`; six separately drafted `strict-xfail` tests for TAU-13, 15, 21, 31, 38, 41 show XFAIL locally; 38 existing τ³ tests continue to pass. These are **owner-reported execution results**, not CI evidence observed or re-run during this documentation work. The full 42-row mapping, six XFAIL test bodies, logs and commit state were **not provided to this audit**. Do not replace that artifact with assumptions based on matching names.
+**Assistant-run local verification report and crosswalk summary (not attached or committed in inspected sources):** 42 scenario entries including TAU-06a and TAU-06b separately. An assistant-run local verification on 2026-10-17 in a clone at `c50a41c` reported that 33 distinct referenced tests pass at NEG-03 `c50a41c`; six separately drafted `strict-xfail` tests for TAU-13, 15, 21, 31, 38, 41 showed XFAIL in that local check; 38 existing τ³ tests passed in that local check. These are **reported results from an assistant-run local verification dated 2026-10-17**, not independently rerun or verified from logs by this PR author. Do not describe these as owner-verified. The full 42-row mapping, six XFAIL test bodies, logs and commit state were **not provided to this audit**. The follow-up review names `TAU_ACCEPTANCE_CROSSWALK.md`, a companion CSV, and `test_tau_xfail_draft.py` as existing in an external clone; those files were **not found in the connected GitHub branch or accessible chat files** on this review. They must be imported unchanged from their actual source, not guessed or recreated. Do not replace that artifact with assumptions based on matching names.
 
 **Actual source inventory, inspected at pinned commits:** 25 safety tests, 9 adapter tests, 4 preflight tests on NEG-03 (**38 total**), plus **3 PR #6 regression tests** from a different ref. **41 inspected named test functions across two refs is not equal to 42 mapped scenarios**, and they are not co-located at a validated consolidated head.
 
-## Owner-reported 42-scenario status distribution
+## Reported 42-scenario status distribution (assistant-run local review)
 
-| Owner's status | Count | Independent confirmation from this audit |
+| Reported status | Count | Independent confirmation from this audit |
 |---|---:|---|
 | HAS TEST | 8 | Supporting functions exist, but exact 42-row mapping not accessible |
 | HAS TEST, authority open (TAU-05, TAU-07) | 2 | Supporting functions exist, but exact 42-row mapping not accessible |
 | PARTIAL | 6 | Reported by owner; source or tests may partially support, full mapping not accessible |
-| DEFECT (owner-reproduced: TAU-13, 15, 21, 31, 38, 41) | 6 | Reported by owner; source or tests may partially support, full mapping not accessible |
+| DEFECT (assistant-reported reproduced: TAU-13, 15, 21, 31, 38, 41) | 6 | Reported by owner; source or tests may partially support, full mapping not accessible |
 | NEEDS TEST | 10 | Reported by owner; source or tests may partially support, full mapping not accessible |
 | IN PR #6 (not qualified on NEG-03) | 3 | Three source functions verified in PR #6; integration not verified |
 | CONFLICT (TAU-11) | 1 | Reported by owner; source or tests may partially support, full mapping not accessible |
@@ -79,24 +79,24 @@ Every row is reportedly **no live runs and no independent reproduction**; S (sta
 
 ## Crosswalk corrections and explicit unresolved authority questions
 
-| Identifier | Owner's finding / available source | Expected handling before DoD | Status |
+| Identifier | Review finding / available source | Expected handling before DoD | Status |
 |---|---|---|---|
 | TAU-11 | Frozen-target fallback is **order-sensitive**, and the existing test asserts that behavior. | Document fallback scope; for live task-15 results use native τ³ DB match as primary task-success source. Do not silently rewrite a frozen test. | **CONFLICT / claim clarification required** |
-| TAU-13 | Owner reproduced a successful write without state evidence obtaining PASS. | Preserve distinction between tool-call success, native state mutation and task success; build missing-effect negative controls. | **DEFECT reported, six-XFAIL pack not received** |
-| TAU-15 / 21 | Owner reports defects with drafted strict-XFAIL cases; precise scenario statements and fixtures not supplied. | Import authoritative text/fixtures before assigning remediation or asserting expected outcome. | **DEFECT reported / full details absent** |
-| TAU-30 | Owner's earlier draft expected FAIL when consent is absent; NEG-02 intentionally returns REVIEW for missing/unsupported authorization evidence. | **Decision open.** REVIEW unless trustworthy capture-completeness evidence permits a stronger conclusion of observed unauthorized action. FAIL must require a separately approved oracle, not inference from missing capture alone. | **DECISION, not approved** |
+| TAU-13 | The assistant-run local review reported reproducing a successful write without state evidence obtaining PASS. | Preserve distinction between tool-call success, native state mutation and task success; build missing-effect negative controls. | **DEFECT reported, six-XFAIL pack not received** |
+| TAU-15 / 21 | Assistant-run local verification reports defects with drafted strict-XFAIL cases; precise scenario statements and fixtures not supplied. | Import authoritative text/fixtures before assigning remediation or asserting expected outcome. | **DEFECT reported / full details absent** |
+| TAU-30 | Earlier draft expected FAIL when consent is absent; NEG-02 intentionally returns REVIEW for missing/unsupported authorization evidence. | **Decision open.** REVIEW unless trustworthy capture-completeness evidence permits a stronger conclusion of observed unauthorized action. FAIL must require a separately approved oracle, not inference from missing capture alone. | **DECISION, not approved** |
 | TAU-31 | Current `test_task15_return_flight_check_is_explicitly_not_applicable` asserts `PASS` plus `not_applicable=True`; it thereby encodes the known representation defect. | Introduce an independent applicability field, migrate assertion and denominator, and preserve V1.5 enums. | **DEFECT / new schema required** |
 | TAU-33 | Ambiguity over which τ³ path supplies the *release-relevant* verdict. | Keep native task-success evidence, TRACE-Well safety obligation results and external governed release authorization separate. Do not let TRACE-Well auto-issue GO/NO-GO. | **DECISION open** |
 | TAU-34–36 | Three named PR #6 tests verified, but they target an older branch with fixtures missing NEG-02 native user/policy evidence. | Integrate only after approval of Change 3 and compatible fixtures; verify on consolidated head. | **PR #6 separate / HOLD** |
 | TAU-38 | A/B scripted consent names the reservation, while runner annotates `allowed_reservation_ids=None` on consequential writes. | Derive scope only from validated native prior consent under pinned policy; keep evaluator independent of self-asserted telemetry. | **DEFECT / decision on provenance seam pending** |
 | TAU-41 | Preflight currently trusts literal PASS strings and nonempty evidence refs without validating their authenticity. | Require source-verifiable gate receipts, digest/identity binding, adversarial forged-receipt tests. | **DEFECT / missing verification** |
 | D9 | Agent completion-claim detection uses substring matching, not an authoritative semantic parser. | Decide whether absence of a detected claim can prove no false-success claim or should remain unresolved. | **DECISION pending** |
-| D10 | Owner lists a decision called D10; its exact definition is not supplied in this conversation. | Preserve ID and defer ruling until authoritative wording is available; do not invent semantics. | **DEFINITION REQUIRED** |
+| D10 | **D10 — `NOT_APPLICABLE` encoding:** separate applicability field, no verdict for N/A, excluded from applicable-outcome denominators; replaces `PASS` plus a `not_applicable` metadata flag. | Apply the D10 requirement to the proposed τ³ producer schema, including TAU-15, TAU-21 and TAU-31. Preserve V1.5's frozen `Verdict` enum. Add schema migration and denominator tests. | **DEFINED / schema implementation pending** |
 | TWE-01 | Runner is under `experiments/`, adapter/evaluator/preflight under `tracewell/`. | Maintain experiment-only ownership and compatible imports until a location decision is approved in ADR-0022. | **ADR proposed / not accepted** |
 
 ### Issues not yet assigned a TAU ID
 
-| Unmapped issue | Owner's reported finding | Proposed owner |
+| Unmapped issue | Assistant-run review finding | Proposed owner |
 |---|---|---|
 | V1.5 empty-expectation PASS | Reproduced via `compare_pair` and `tracewell run-pair` per owner. Preserve frozen V1.5; attach exact repro and evaluate admission guard or separately governed core fix. | TWE-09 |
 | Output directory not ignored | `.gitignore` on NEG-03 has `results/runs/*`, not runner default `experiments/tau3_airline_agent_safety/results/`. | TWE-08 |
@@ -117,15 +117,15 @@ Do **not** conflate green CI on `main`, tests on NEG-03, or PR #6 fixtures with 
 
 - [x] Inspect and pin existing named-test sources across NEG-03 and PR #6.
 - [x] Capture the owner's 42-row status totals and known crosswalk conflicts without implying file access.
-- [x] List six owner-reported XFAILs and no-live/no-independent-evidence qualifications.
+- [x] List six assistant-reported XFAILs and no-live/no-independent-evidence qualifications.
 - [ ] Obtain the **actual authoritative 42-row TAU crosswalk**, including TAU-06a/06b; confirm every row's test function, lane, expected verdict, control source, reviewer and evidence.
 - [ ] Obtain the six strict-XFAIL files and CI/test logs; register precise tests/expected outcomes rather than claim already integrated.
-- [ ] Approve decisions D9, D10, TAU-30, TAU-33, TAU-38 and TWE-01.
+- [ ] Approve decisions D9 authority, D10 schema acceptance, TAU-30, TAU-33, TAU-38 and TWE-01.
 - [ ] Attach an executable acceptance matrix to the eventual consolidated exact SHA.
 - [ ] Verify all outstanding NEEDS TEST controls and ensure defects do not become PASS under missing evidence.
 - [ ] Admit or explicitly defer consumer-side controls without implementing a consumer dependency.
 
-**TWE-02 validation: PARTIAL, not DONE.** No evaluator code modified; Change 3 remains HOLD.
+**TWE-02 validation: PARTIAL, not DONE.** The reported six-XFAIL results do not constitute passing production acceptance tests: strict-XFAIL records a known defect until repaired and converted to positive passing regressions. No evaluator code modified; Change 3 remains HOLD.
 
 ## Source fingerprints
 
