@@ -29,3 +29,5 @@ results/runs/*
 .env
 .env.*
 !.env.example
+
+results/real-model/
