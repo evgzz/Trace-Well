@@ -210,9 +210,9 @@ def get_inference_endpoint(name, namespace=None, token=None):
     return _Endpoint(name, namespace)
 """
 
-# Loaded by every Python process the script starts. It refuses all outbound
-# sockets, and records then stops any judge process (G3/G4) before it can send
-# anything, wherever in the script that process is started.
+# Loaded by every Python process the script starts. It blocks Python socket
+# connect attempts (not a full sandbox), and records then stops any judge
+# process (G3/G4) before it can send anything, wherever the script starts it.
 SITECUSTOMIZE = """
 import json, os, socket, sys
 
@@ -316,7 +316,7 @@ def token_calls(result):
 def assert_protected_paths_untouched(result):
     assert token_calls(result) == []  # G1 wake-up and G2 direct request: not invoked
     assert result.judge == []  # G3/G4 judge process: not invoked
-    assert result.net == []  # no socket opened by any Python process
+    assert result.net == []  # no Python socket connect attempt
     # Secondary evidence only; the invocation logs above are the proof.
     assert not (result.out / "raw_request.json").exists()
     assert not (result.out / "run_summary.json").exists()
