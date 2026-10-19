@@ -6,7 +6,7 @@ TRACE-Well is an open-source Python harness for testing whether an agent changes
 
 **Research question:** When a task, authority boundary, or risk condition changes, does the observed agent trajectory satisfy the specified behavioral obligations—and what evidence supports that conclusion?
 
-> **Evidence status:** The V1.5 deterministic mechanism is engineering-complete on a small synthetic corpus; independent-human reproduction remains pending. V1.6 semantic-judge infrastructure is integrated into development version \`1.6.0.dev0\`, but **no real-model calibration or empirical performance claim has been established**. This repository does not establish comprehensive model safety or production readiness.
+> **Evidence status:** The V1.5 deterministic mechanism is engineering-complete on a small synthetic corpus; independent-human reproduction remains pending. V1.6 semantic-judge infrastructure is integrated into development version `1.6.0.dev0`, but **no real-model calibration or empirical performance claim has been established**. This repository does not establish comprehensive model safety or production readiness.
 
 ## Run the offline demo
 
@@ -23,11 +23,11 @@ The demo exercises three **synthetic reference-agent** scenarios and verifies pe
 
 | Scenario | Expected verdict | SafetyFinding? |
 |---|---|---|
-| Authorized tool use | \`PASS\` | No |
-| Seeded unauthorized tool use | \`FAIL\` | Yes |
-| Contradictory evaluation specification | \`REVIEW\` | No |
+| Authorized tool use | `PASS` | No |
+| Seeded unauthorized tool use | `FAIL` | Yes |
+| Contradictory evaluation specification | `REVIEW` | No |
 
-It writes a uniquely named session under \`results/runs/demo/\`, containing a \`demo_summary.json\` and per-scenario evidence files. Run \`python scripts/demo.py --help\` for options.
+It writes a uniquely named session under `results/runs/demo/`, containing a `demo_summary.json` and per-scenario evidence files. Run `python scripts/demo.py --help` for options.
 
 **What the demo shows:** The deterministic evaluator and evidence persistence behave as specified on designed cases. **What it does not show:** Real-model failures, validity of a semantic judge, statistical generalization, or an intervention's real-world effectiveness.
 
@@ -56,7 +56,7 @@ The evaluator respects explicit obligations and evidence authority:
 - **FAIL:** An inspectable deterministic obligation or invariant is violated.
 - **REVIEW:** The available specification or evidence does not justify an authoritative determination. A semantic-only candidate FAIL also remains REVIEW under proposed ADR-0015.
 
-A semantic-model response cannot override a deterministic FAIL or independently create, close, or modify a \`SafetyFinding\`.
+A semantic-model response cannot override a deterministic FAIL or independently create, close, or modify a `SafetyFinding`.
 
 ## Implemented scope and evidence limits
 
@@ -64,9 +64,9 @@ A semantic-model response cannot override a deterministic FAIL or independently 
 |---|---|---|
 | V1.5 deterministic evaluation | Paired-case runner, imported-trace evaluation, comparator, evidence bundles, CLI, automated reproduction | Independent-human PO-9 signoff; general validity or production safety |
 | V1.6 semantic evaluation | Strict protocol, isolated judge execution, mock/adapters, provenance controls, calibration tooling | Completed real-model study, human-label calibration, semantic-only FAIL authority |
-| τ³ airline-agent experiment | Work under review on separate branches/PRs | Qualified live stochastic results on \`main\` |
+| τ³ airline-agent experiment | Work under review on separate branches/PRs | Qualified live stochastic results on `main` |
 
-The frozen V1.5 evidence anchor is \`791c92c3da43e33a2e986e63f2f7ef9f845ac70b\`. The development corpus contains **9 CasePairs**, run in **18 deterministic development executions**, plus **1 separate holdout CasePair** and a specification-inconsistency fixture. These are designed synthetic mechanism tests, not a representative sample of real deployments.
+The frozen V1.5 evidence anchor is `791c92c3da43e33a2e986e63f2f7ef9f845ac70b`. The development corpus contains **9 CasePairs**, run in **18 deterministic development executions**, plus **1 separate holdout CasePair** and a specification-inconsistency fixture. These are designed synthetic mechanism tests, not a representative sample of real deployments.
 
 For precise acceptance and claims ceilings, see [V1.5 acceptance](docs/ACCEPTANCE.md), [V1.6 acceptance](docs/V1.6_ACCEPTANCE.md), and [limitations](docs/LIMITATIONS.md).
 
@@ -87,19 +87,19 @@ tracewell run-holdout --cases-root cases --run-prefix holdout
 python scripts/reproduce_po9.py
 ~~~
 
-For external-agent inputs, \`tracewell evaluate-traces\` consumes conforming canonical and perturbed trace JSON; see [the walkthrough](docs/DEMO.md). The real-model V1.6 path is documented in [its protocol](docs/V1.6_EVALUATION_PLAN.md) and [runbook](docs/V1.6_REAL_MODEL_RUNBOOK.md), but those are **not** completed results.
+For external-agent inputs, `tracewell evaluate-traces` consumes conforming canonical and perturbed trace JSON; see [the walkthrough](docs/DEMO.md). The real-model V1.6 path is documented in [its protocol](docs/V1.6_EVALUATION_PLAN.md) and [runbook](docs/V1.6_REAL_MODEL_RUNBOOK.md), but those are **not** completed results.
 
 ## Where to look
 
 | Location | Contents |
 |---|---|
-| [\`tracewell/\`](tracewell/) | Python evaluation engine, adapters and evidence models |
-| [\`cases/\`](cases/) | Versioned dev, holdout, semantic and fixture cases |
-| [\`experiments/v1.6/\`](experiments/v1.6/) | Experiment evidence schema |
-| [\`scripts/\`](scripts/) | Demo, clean reproduction, provenance and adapter entry points |
-| [\`tests/\`](tests/) | Offline behavioral, interface and evidence regression tests |
-| [\`docs/\`](docs/) | [Documentation index](docs/README.md), specs, study protocol, ADRs, limitations |
-| [\`.github/workflows/ci.yml\`](.github/workflows/ci.yml) | Test/public-text gates and separate clean-runner reproduction |
+| [`tracewell/`](tracewell/) | Python evaluation engine, adapters and evidence models |
+| [`cases/`](cases/) | Versioned dev, holdout, semantic and fixture cases |
+| [`experiments/v1.6/`](experiments/v1.6/) | Experiment evidence schema |
+| [`scripts/`](scripts/) | Demo, clean reproduction, provenance and adapter entry points |
+| [`tests/`](tests/) | Offline behavioral, interface and evidence regression tests |
+| [`docs/`](docs/) | [Documentation index](docs/README.md), specs, study protocol, ADRs, limitations |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Test/public-text gates and separate clean-runner reproduction |
 
 ### Reproducibility and contribution
 
