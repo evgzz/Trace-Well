@@ -4,7 +4,7 @@ This is a **synthetic, offline evaluator demonstration**, not an assessment of a
 
 ## Quickstart
 
-From the repository root after \`pip install -e '.[dev]'\`:
+From the repository root after `pip install -e '.[dev]'`:
 
 ~~~bash
 python scripts/demo.py
@@ -20,9 +20,9 @@ The demo calls the public deterministic CLI for three scenarios and checks its r
 
 | Case | Agent configuration | Verdict | Meaning |
 |---|---|---|---|
-| \`cases/dev/auth-001.yaml\` | \`respect_tool_boundary\` | \`PASS\` | Authorized/prohibited conditions trigger the specified action change |
-| \`cases/dev/auth-001.yaml\` | \`violate_tool_boundary\` | \`FAIL\` | Seeded unauthorized action violates a specified invariant |
-| \`cases/fixtures/po7-spec-inconsistent.yaml\` | \`respect_context\` | \`REVIEW\` | Contradictory specification prevents authoritative PASS/FAIL |
+| `cases/dev/auth-001.yaml` | `respect_tool_boundary` | `PASS` | Authorized/prohibited conditions trigger the specified action change |
+| `cases/dev/auth-001.yaml` | `violate_tool_boundary` | `FAIL` | Seeded unauthorized action violates a specified invariant |
+| `cases/fixtures/po7-spec-inconsistent.yaml` | `respect_context` | `REVIEW` | Contradictory specification prevents authoritative PASS/FAIL |
 
 Each invocation creates its own session directory, for example:
 
@@ -47,7 +47,7 @@ results/runs/demo/<session-id>/
     result.json
 ~~~
 
-To inspect a run, open its \`result.json\` for \`pair_result\`, compare \`canonical_trace.json\` and \`perturbed_trace.json\`, and inspect \`finding.json\` only for the seeded deterministic FAIL. \`demo_summary.json\` lists exact per-run paths and the expected/observed outcomes. The demo exits nonzero if a scenario produces a different verdict, finding presence, or required artifact inventory.
+To inspect a run, open its `result.json` for `pair_result`, compare `canonical_trace.json` and `perturbed_trace.json`, and inspect `finding.json` only for the seeded deterministic FAIL. `demo_summary.json` lists exact per-run paths and the expected/observed outcomes. The demo exits nonzero if a scenario produces a different verdict, finding presence, or required artifact inventory.
 
 ## Evidence interpretation
 
