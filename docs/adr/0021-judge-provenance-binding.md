@@ -221,7 +221,7 @@ The Transport section above refuses redirects, so the bearer token can only reac
 
 Draft PR #21 implements additional hosted-endpoint admission controls: authenticated metadata lookup, repository and immutable-revision matching, an endpoint-state allowlist, admitted-origin propagation, and admission-guarded cleanup.
 
-These controls remain experimental. Adopting them requires a separately proposed architectural decision, covering the endpoint lifecycle and a confirmed-cleanup policy. Cleanup in particular is not settled: a pause call can return without the endpoint being confirmed `paused`. This amendment does not authorize merging PR #21, executing hosted inference, or changing V1.6 acceptance status.
+These controls remain experimental. Draft PR #21 now includes offline-tested pause-state confirmation with bounded polling. Its endpoint lifecycle policy has not been accepted into the architecture or qualified against a live endpoint; adopting it requires a separately proposed architectural decision. This amendment does not authorize merging PR #21, executing hosted inference, or changing V1.6 acceptance status.
 
 ### Consequences
 
