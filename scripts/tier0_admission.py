@@ -198,6 +198,8 @@ def budget_report(
     commit: str,
     worktree_dirty: bool,
     repeats: int,
+    pause_on_exit: bool,
+    skip_setup: bool,
     curl_connect_seconds: float,
     curl_max_seconds: float,
     pause_confirm_seconds: float,
@@ -210,11 +212,17 @@ def budget_report(
 
     The total is an estimate over bounded stages only, not a guaranteed maximum
     wall-clock time or cost cap; ``excluded`` lists what it does not cover.
-    ``budget_id`` digests every other field, so an acknowledgment is bound to
-    this exact commit and configuration.
+    ``budget_id`` digests every other field. It binds the reported commit,
+    clean/dirty indicator, repeat count, pause and setup switches, timing
+    limits and stage allowances. It does not attest the contents of uncommitted
+    changes, the deployment identity, that G0 checks ran, or approval of paid
+    inference.
     """
     if not (type(repeats) is int and 1 <= repeats <= MAX_REPEATS):
         raise ValueError(f"repeats must be an integer from 1 to {MAX_REPEATS}")
+    for name, flag in (("pause_on_exit", pause_on_exit), ("skip_setup", skip_setup), ("worktree_dirty", worktree_dirty)):
+        if type(flag) is not bool:
+            raise ValueError(f"{name} must be a boolean")
     for name, value in (
         ("curl_connect_seconds", curl_connect_seconds),
         ("curl_max_seconds", curl_max_seconds),
@@ -232,12 +240,14 @@ def budget_report(
     components = {
         "g1_g2_curl_seconds": CURL_REQUESTS * curl_max_seconds,
         "g3_g4_judge_seconds": repeats * judge_timeout_seconds,
-        "cleanup_seconds": pause_command_seconds + pause_kill_grace_seconds,
+        "cleanup_seconds": pause_command_seconds + pause_kill_grace_seconds if pause_on_exit else 0.0,
     }
     report: dict[str, Any] = {
         "commit": commit,
         "worktree_dirty": worktree_dirty,
         "repeats": repeats,
+        "pause_on_exit": pause_on_exit,
+        "skip_setup": skip_setup,
         "settings": {
             "curl_requests": CURL_REQUESTS,
             "curl_connect_seconds": curl_connect_seconds,
@@ -264,11 +274,14 @@ def format_budget(report: dict[str, Any]) -> str:
         "Tier-0 run budget (estimate over bounded stages; not a cost cap)",
         f"  commit              {report['commit']}{' (worktree has uncommitted changes)' if report['worktree_dirty'] else ''}",
         f"  repeats             {report['repeats']}",
+        f"  pause on exit       {'yes' if report['pause_on_exit'] else 'NO: the endpoint is left running after the run'}",
+        f"  G0 setup checks     {'SKIPPED (offline-test mode)' if report['skip_setup'] else 'run'}",
         f"  G1/G2 curl          {settings['curl_requests']} x {settings['curl_max_seconds']:g}s = {parts['g1_g2_curl_seconds']:g}s"
         f"  (connect limit {settings['curl_connect_seconds']:g}s each)",
         f"  G3/G4 judge         {report['repeats']} x {settings['judge_timeout_seconds']:g}s = {parts['g3_g4_judge_seconds']:g}s",
-        f"  cleanup             {settings['pause_command_seconds']:g}s + {settings['pause_kill_grace_seconds']:g}s grace = {parts['cleanup_seconds']:g}s"
-        f"  (polling deadline {settings['pause_confirm_seconds']:g}s, every {settings['pause_poll_seconds']:g}s)",
+        (f"  cleanup             {settings['pause_command_seconds']:g}s + {settings['pause_kill_grace_seconds']:g}s grace = {parts['cleanup_seconds']:g}s"
+         f"  (polling deadline {settings['pause_confirm_seconds']:g}s, every {settings['pause_poll_seconds']:g}s)"
+         if report["pause_on_exit"] else "  cleanup             0s (pause disabled)"),
         f"  bounded total       {report['bounded_stages_total_seconds']:g}s",
         "  not included:",
         *(f"    - {item}" for item in report["excluded"]),
@@ -294,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
     budget_parser.add_argument("--commit", required=True)
     budget_parser.add_argument("--worktree-dirty", action="store_true")
     budget_parser.add_argument("--repeats", type=int, required=True)
+    budget_parser.add_argument("--pause-on-exit", choices=("0", "1"), required=True)
+    budget_parser.add_argument("--skip-setup", choices=("0", "1"), required=True)
     for flag in ("--curl-connect-seconds", "--curl-max-seconds", "--pause-confirm-seconds",
                  "--pause-poll-seconds", "--pause-command-seconds", "--pause-kill-grace-seconds"):
         budget_parser.add_argument(flag, type=_seconds_arg, required=True)
@@ -306,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
                 commit=args.commit,
                 worktree_dirty=args.worktree_dirty,
                 repeats=args.repeats,
+                pause_on_exit=args.pause_on_exit == "1",
+                skip_setup=args.skip_setup == "1",
                 curl_connect_seconds=args.curl_connect_seconds,
                 curl_max_seconds=args.curl_max_seconds,
                 pause_confirm_seconds=args.pause_confirm_seconds,

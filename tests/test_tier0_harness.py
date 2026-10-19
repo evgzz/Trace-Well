@@ -239,6 +239,17 @@ if os.path.basename(sys.argv[0]) in ("tier0_capture_judge.py", "hf_endpoint_judg
     raise SystemExit(3)
 """
 
+FAKE_GIT = """#!/usr/bin/env python3
+import os, sys
+args = sys.argv[1:]
+if args == ["rev-parse", "HEAD"]:
+    print("f" * 40)
+elif args == ["status", "--porcelain"]:
+    print(os.environ["FAKE_GIT_PORCELAIN"])
+else:
+    sys.exit(f"fake git: unsupported {args}")
+"""
+
 FAKE_CURL = """#!/usr/bin/env python3
 import json, os, sys
 argv = sys.argv[1:]
@@ -306,6 +317,13 @@ def harness(tmp_path):
             FAKE_NET_LOG=str(logs["net"]),
         )
         env.update(env_overrides)
+        if "FAKE_GIT_PORCELAIN" in env_overrides:
+            fake_git_bin = tmp_path / "fake_git_bin"
+            fake_git_bin.mkdir(exist_ok=True)
+            git = fake_git_bin / "git"
+            git.write_text(FAKE_GIT, encoding="utf-8")
+            git.chmod(0o755)
+            env["PATH"] = f"{fake_git_bin}{os.pathsep}{env['PATH']}"
         if "TIER0_BUDGET_ACK" not in env_overrides:
             env["TIER0_BUDGET_ACK"] = expected_budget_id(env)
         proc = subprocess.run(
@@ -332,6 +350,8 @@ def expected_budget_id(env):
     try:
         return ADMISSION.budget_report(
             commit=commit, worktree_dirty=dirty, repeats=int(env.get("TIER0_REPEATS", "3")),
+            pause_on_exit=env.get("TIER0_PAUSE_ON_EXIT", "1") == "1",
+            skip_setup=env.get("TIER0_SKIP_SETUP", "0") == "1",
             curl_connect_seconds=float(env.get("TIER0_CURL_CONNECT_SECONDS", "30")),
             curl_max_seconds=float(env.get("TIER0_CURL_MAX_SECONDS", "660")),
             pause_confirm_seconds=float(env.get("TIER0_PAUSE_CONFIRM_SECONDS", "300")),
@@ -626,7 +646,8 @@ def test_shell_blocked_pause_call_is_bounded_and_fails(harness):
 # --- budget report and acknowledgment -----------------------------------------
 
 BUDGET_KWARGS = dict(
-    commit="0" * 40, worktree_dirty=False, repeats=3, curl_connect_seconds=30.0,
+    commit="0" * 40, worktree_dirty=False, repeats=3, pause_on_exit=True, skip_setup=False,
+    curl_connect_seconds=30.0,
     curl_max_seconds=660.0, pause_confirm_seconds=300.0, pause_poll_seconds=5.0,
     pause_command_seconds=420.0, pause_kill_grace_seconds=10.0, judge_timeout_seconds=150.0,
 )
@@ -656,6 +677,7 @@ def test_budget_uses_the_pipeline_judge_timeout():
 
 @pytest.mark.parametrize("change", [
     {"commit": "1" * 40}, {"worktree_dirty": True}, {"repeats": 4}, {"curl_max_seconds": 661.0},
+    {"pause_on_exit": False}, {"skip_setup": True},
     {"curl_connect_seconds": 31.0}, {"pause_confirm_seconds": 301.0}, {"pause_poll_seconds": 6.0},
     {"pause_command_seconds": 421.0}, {"pause_kill_grace_seconds": 11.0}, {"judge_timeout_seconds": 151.0},
 ])
@@ -711,3 +733,61 @@ def test_shell_acknowledged_run_records_the_budget(harness):
     assert result.proc.returncode == 0, result.proc.stdout + result.proc.stderr
     report = json.loads((result.out / "budget_report.json").read_text())
     assert report["repeats"] == 1 and report["commit"] == git_state()[0]
+
+
+
+def test_budget_without_pause_has_no_cleanup_allowance_and_says_so():
+    report = ADMISSION.budget_report(**{**BUDGET_KWARGS, "pause_on_exit": False, "skip_setup": True})
+    assert report["components"]["cleanup_seconds"] == 0.0
+    assert report["bounded_stages_total_seconds"] == 2430.0
+    text = ADMISSION.format_budget(report)
+    assert "endpoint is left running" in text and "SKIPPED (offline-test mode)" in text
+
+
+@pytest.mark.parametrize("field", ["pause_on_exit", "skip_setup", "worktree_dirty"])
+@pytest.mark.parametrize("value", [1, 0, "1", None])
+def test_budget_switches_must_be_booleans(field, value):
+    with pytest.raises(ValueError, match=field):
+        ADMISSION.budget_report(**{**BUDGET_KWARGS, field: value})
+
+
+@pytest.mark.parametrize("name", ["TIER0_PAUSE_ON_EXIT", "TIER0_SKIP_SETUP"])
+@pytest.mark.parametrize("value", ["true", "yes", "2", "01", "-1", "on"])
+def test_shell_switches_must_be_exactly_0_or_1(harness, name, value):
+    result = harness(**{name: value})
+    assert result.proc.returncode == 2
+    assert f"{name} must be exactly 0 or 1" in result.proc.stderr
+    assert not (result.out / "budget_report.json").exists()
+    assert result.curl == [] and result.pauses == []
+
+
+def test_shell_ack_does_not_carry_over_when_pause_is_disabled(harness):
+    acked_with_pause = expected_budget_id({"TIER0_REPEATS": "1", "TIER0_SKIP_SETUP": "1"})
+    result = harness(TIER0_PAUSE_ON_EXIT="0", TIER0_BUDGET_ACK=acked_with_pause)
+    assert result.proc.returncode == 2
+    assert "Budget not acknowledged" in result.proc.stderr
+    assert "endpoint is left running" in result.proc.stdout
+    assert result.curl == []
+
+
+def test_shell_full_run_requires_pause_on_exit(harness):
+    result = harness(TIER0_SKIP_SETUP="0", TIER0_PAUSE_ON_EXIT="0", TIER0_BUDGET_ACK="x")
+    assert result.proc.returncode == 2
+    assert "A full run requires TIER0_PAUSE_ON_EXIT=1" in result.proc.stderr
+    assert not (result.out / "budget_report.json").exists()
+    assert result.curl == [] and result.pauses == []
+
+
+def test_shell_full_run_requires_clean_worktree(harness):
+    result = harness(TIER0_SKIP_SETUP="0", FAKE_GIT_PORCELAIN=" M scripts/x.py", TIER0_BUDGET_ACK="x")
+    assert result.proc.returncode == 2
+    assert "A full run requires a clean worktree" in result.proc.stderr
+    assert not (result.out / "budget_report.json").exists()
+    assert result.curl == []
+
+
+def test_shell_report_records_both_switches(harness):
+    result = harness(TIER0_PAUSE_ON_EXIT="0")
+    assert result.proc.returncode == 0, result.proc.stdout + result.proc.stderr
+    report = json.loads((result.out / "budget_report.json").read_text())
+    assert report["pause_on_exit"] is False and report["skip_setup"] is True

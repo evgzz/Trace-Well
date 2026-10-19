@@ -15,6 +15,10 @@ export HF_ENGINE="${HF_ENGINE:-vllm}"
 export RUN_ID="${RUN_ID:-tier0-qwen-hf-001}"
 export HF_REVISION
 TIER0_PAUSE_ON_EXIT="${TIER0_PAUSE_ON_EXIT:-1}"
+TIER0_SKIP_SETUP="${TIER0_SKIP_SETUP:-0}"
+for switch in TIER0_PAUSE_ON_EXIT TIER0_SKIP_SETUP; do
+  case "${!switch}" in 0|1) ;; *) echo "$switch must be exactly 0 or 1 (got '${!switch}')" >&2; exit 2 ;; esac
+done
 TIER0_PAUSE_CONFIRM_SECONDS="${TIER0_PAUSE_CONFIRM_SECONDS:-300}"
 TIER0_PAUSE_POLL_SECONDS="${TIER0_PAUSE_POLL_SECONDS:-5}"
 # End-to-end bound on the pause command, including a blocked control-plane call.
@@ -60,8 +64,19 @@ mkdir -p "$OUT"
 commit="$(git rev-parse HEAD)"
 dirty=""
 [ -z "$(git status --porcelain)" ] || dirty="--worktree-dirty"
+# A full run (setup not skipped) is the only kind that may become a paid run:
+# it must pause on exit and run from a clean worktree. Pause-off and dirty
+# trees remain available to the offline tests, which set TIER0_SKIP_SETUP=1;
+# the report and its id record both switches either way.
+if [ "$TIER0_SKIP_SETUP" = "0" ]; then
+  [ "$TIER0_PAUSE_ON_EXIT" = "1" ] \
+    || { echo "A full run requires TIER0_PAUSE_ON_EXIT=1; stopping before admission." >&2; exit 2; }
+  [ -z "$dirty" ] \
+    || { echo "A full run requires a clean worktree (commit or stash changes); stopping before admission." >&2; exit 2; }
+fi
 python scripts/tier0_admission.py budget --commit "$commit" $dirty \
   --repeats "$TIER0_REPEATS" \
+  --pause-on-exit "$TIER0_PAUSE_ON_EXIT" --skip-setup "$TIER0_SKIP_SETUP" \
   --curl-connect-seconds "$TIER0_CURL_CONNECT_SECONDS" --curl-max-seconds "$TIER0_CURL_MAX_SECONDS" \
   --pause-confirm-seconds "$TIER0_PAUSE_CONFIRM_SECONDS" --pause-poll-seconds "$TIER0_PAUSE_POLL_SECONDS" \
   --pause-command-seconds "$TIER0_PAUSE_COMMAND_SECONDS" --pause-kill-grace-seconds "$PAUSE_KILL_GRACE_SECONDS" \
@@ -111,7 +126,7 @@ echo "== G0: branch, ignore rule, baseline"
 grep -qx "results/real-model/" .gitignore || { echo "Add 'results/real-model/' to .gitignore first"; exit 1; }
 # TIER0_SKIP_SETUP=1 skips these setup gates (used by the offline tests). It is
 # not a security boundary: admission and host binding below always run.
-if [ "${TIER0_SKIP_SETUP:-0}" != "1" ]; then
+if [ "$TIER0_SKIP_SETUP" = "0" ]; then
   branch="$(git branch --show-current)"
   if [ "$branch" = "main" ]; then echo "Refusing to run on main"; exit 1; fi
   python -m pip install -q -e '.[dev]' huggingface_hub
