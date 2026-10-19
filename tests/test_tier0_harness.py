@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -182,7 +183,7 @@ def test_adapter_accepts_schema_and_expected_host_together():
 
 # --- shell orchestration: all protected paths -------------------------------
 
-FAKE_HUB = '''
+FAKE_HUB = """
 import json, os
 
 class _Endpoint:
@@ -196,6 +197,8 @@ class _Endpoint:
         self.revision = meta.get("revision")
 
     def pause(self):
+        if os.environ.get("FAKE_HF_PAUSE_FAIL") == "1":
+            raise RuntimeError("simulated pause failure")
         with open(os.environ["FAKE_HF_PAUSE_LOG"], "a") as handle:
             handle.write(json.dumps({"name": self.name, "namespace": self.namespace}) + "\\n")
         self.status = "paused"
@@ -205,9 +208,32 @@ class _Endpoint:
 
 def get_inference_endpoint(name, namespace=None, token=None):
     return _Endpoint(name, namespace)
-'''
+"""
 
-FAKE_CURL = '''#!/usr/bin/env python3
+# Loaded by every Python process the script starts. It refuses all outbound
+# sockets, and records then stops any judge process (G3/G4) before it can send
+# anything, wherever in the script that process is started.
+SITECUSTOMIZE = """
+import json, os, socket, sys
+
+def _log(name, record):
+    with open(os.environ[name], "a") as handle:
+        handle.write(json.dumps(record) + "\\n")
+
+def _refuse(self, address, *args, **kwargs):
+    _log("FAKE_NET_LOG", {"argv0": sys.argv[0], "address": repr(address)})
+    raise OSError("network disabled in tier0 harness tests")
+
+socket.socket.connect = _refuse
+socket.socket.connect_ex = _refuse
+
+if os.path.basename(sys.argv[0]) in ("tier0_capture_judge.py", "hf_endpoint_judge.py"):
+    _log("FAKE_JUDGE_LOG", sys.argv)
+    sys.stderr.write("judge intercepted by test harness\\n")
+    raise SystemExit(3)
+"""
+
+FAKE_CURL = """#!/usr/bin/env python3
 import json, os, sys
 argv = sys.argv[1:]
 with open(os.environ["FAKE_CURL_LOG"], "a") as handle:
@@ -226,22 +252,28 @@ else:
 if out and out != "/dev/null":
     open(out, "w").write(body)
 sys.stdout.write(status)
-'''
+"""
 
 
 @pytest.fixture
 def harness(tmp_path):
     if shutil.which("bash") is None:
         pytest.skip("bash unavailable")
-    fake_lib = tmp_path / "fake_lib" / "huggingface_hub"
-    fake_lib.mkdir(parents=True)
-    (fake_lib / "__init__.py").write_text(FAKE_HUB, encoding="utf-8")
+    fake_lib = tmp_path / "fake_lib"
+    (fake_lib / "huggingface_hub").mkdir(parents=True)
+    (fake_lib / "huggingface_hub" / "__init__.py").write_text(FAKE_HUB, encoding="utf-8")
+    (fake_lib / "sitecustomize.py").write_text(SITECUSTOMIZE, encoding="utf-8")
     fake_bin = tmp_path / "fake_bin"
     fake_bin.mkdir()
     curl = fake_bin / "curl"
     curl.write_text(FAKE_CURL, encoding="utf-8")
     curl.chmod(0o755)
     out = tmp_path / "out"
+    logs = {name: tmp_path / f"{name}.log" for name in ("curl", "judge", "net", "pause")}
+
+    def read(name):
+        path = logs[name]
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
     def run(meta=None, **env_overrides):
         env = {
@@ -250,37 +282,44 @@ def harness(tmp_path):
         }
         env.update(
             PATH=f"{fake_bin}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
-            PYTHONPATH=f"{tmp_path / 'fake_lib'}{os.pathsep}{ROOT}",
+            PYTHONPATH=f"{fake_lib}{os.pathsep}{ROOT}",
             HF_TOKEN="fake-test-secret",
             HF_ENDPOINT_URL=f"https://{HOST}/v1/",
             HF_ENDPOINT_NAME="tier0-qwen",
             HF_REVISION=REVISION,
             TIER0_SKIP_SETUP="1",
-            TIER0_REPEATS="0",
+            TIER0_REPEATS="1",
             TIER0_OUT_DIR=str(out),
             FAKE_HF_METADATA=json.dumps(metadata() if meta is None else meta),
-            FAKE_HF_PAUSE_LOG=str(tmp_path / "pause.log"),
-            FAKE_CURL_LOG=str(tmp_path / "curl.log"),
+            FAKE_HF_PAUSE_LOG=str(logs["pause"]),
+            FAKE_CURL_LOG=str(logs["curl"]),
+            FAKE_JUDGE_LOG=str(logs["judge"]),
+            FAKE_NET_LOG=str(logs["net"]),
         )
         env.update(env_overrides)
         proc = subprocess.run(
             ["bash", str(SCRIPTS / "tier0_codespace.sh")],
             cwd=ROOT, env=env, capture_output=True, text=True, timeout=120,
         )
-        curl_log = tmp_path / "curl.log"
-        pause_log = tmp_path / "pause.log"
-        calls = [json.loads(line) for line in curl_log.read_text().splitlines()] if curl_log.exists() else []
-        pauses = pause_log.read_text().splitlines() if pause_log.exists() else []
-        return proc, calls, pauses, out
+        return SimpleNamespace(
+            proc=proc, out=out, curl=read("curl"), judge=read("judge"),
+            net=read("net"), pauses=read("pause"),
+        )
 
     return run
 
 
-def protected_paths_untouched(calls, out: Path):
-    token_calls = [c for c in calls if any(a.startswith("Authorization:") for a in c)]
-    assert token_calls == []  # G1 wake-up and G2 direct request never ran
-    assert not (out / "raw_request.json").exists()  # runner prep never ran
-    assert not (out / "run_summary.json").exists()  # G3/G4 adapter runs never ran
+def token_calls(result):
+    return [c for c in result.curl if any(a.startswith("Authorization:") for a in c)]
+
+
+def assert_protected_paths_untouched(result):
+    assert token_calls(result) == []  # G1 wake-up and G2 direct request: not invoked
+    assert result.judge == []  # G3/G4 judge process: not invoked
+    assert result.net == []  # no socket opened by any Python process
+    # Secondary evidence only; the invocation logs above are the proof.
+    assert not (result.out / "raw_request.json").exists()
+    assert not (result.out / "run_summary.json").exists()
 
 
 @pytest.mark.parametrize("meta, env, message", [
@@ -293,50 +332,78 @@ def protected_paths_untouched(calls, out: Path):
     (metadata(), {"HF_ENDPOINT_URL": "https://evil.example.com"}, "does not match"),
 ])
 def test_shell_admission_failure_blocks_all_protected_paths(harness, meta, env, message):
-    proc, calls, pauses, out = harness(meta, **env)
-    assert proc.returncode != 0
-    assert message in proc.stderr
-    assert "no token was sent" in proc.stderr
-    assert calls == []
-    protected_paths_untouched(calls, out)
-    assert pauses == []  # an unadmitted endpoint is never paused
+    result = harness(meta, **env)
+    assert result.proc.returncode != 0
+    assert message in result.proc.stderr
+    assert "no token was sent" in result.proc.stderr
+    assert result.curl == []
+    assert_protected_paths_untouched(result)
+    assert result.pauses == []  # an unadmitted endpoint is never paused
 
 
 def test_shell_requires_explicit_revision(harness):
-    proc, calls, pauses, out = harness(HF_REVISION="")
-    assert proc.returncode != 0
-    assert "HF_REVISION" in proc.stderr
-    assert calls == [] and pauses == []
-    protected_paths_untouched(calls, out)
+    result = harness(HF_REVISION="")
+    assert result.proc.returncode != 0
+    assert "HF_REVISION" in result.proc.stderr
+    assert result.curl == [] and result.pauses == []
+    assert_protected_paths_untouched(result)
 
 
 @pytest.mark.parametrize("state", ["running", "scaledToZero"])
-def test_shell_admitted_run_uses_hardened_curl_on_admitted_origin(harness, state):
-    proc, calls, pauses, out = harness(metadata(status=state))
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert len(calls) == 3  # anonymous probe, G1 wake-up, G2 direct request
-    for argv in calls:
+def test_shell_admitted_run_reaches_every_path_on_admitted_origin(harness, state):
+    result = harness(metadata(status=state))
+    assert result.proc.returncode == 0, result.proc.stdout + result.proc.stderr
+    assert len(result.curl) == 3  # anonymous probe, G1 wake-up, G2 direct request
+    for argv in result.curl:
         assert argv[:2] == ["-q", "--proto"] and argv[2] == "=https"
         assert "--max-redirs" in argv and argv[argv.index("--max-redirs") + 1] == "0"
         assert "-L" not in argv and "--location" not in argv
         url = next(a for a in argv if a.startswith("http"))
         assert url.startswith(f"https://{HOST}/v1/")
-    assert [any(a.startswith("Authorization:") for a in c) for c in calls] == [False, True, True]
-    assert all("--fail-with-body" in c for c in calls[1:])
-    assert json.loads((out / "admission.json").read_text())["expected_host"] == HOST
-    assert len(pauses) == 1 and json.loads(pauses[0])["name"] == "tier0-qwen"
+    assert [any(a.startswith("Authorization:") for a in c) for c in result.curl] == [False, True, True]
+    assert all("--fail-with-body" in c for c in result.curl[1:])
+
+    assert len(result.judge) == 1  # G3/G4: one repetition, intercepted before sending
+    judge_argv = result.judge[0]
+    assert judge_argv[judge_argv.index("--base-url") + 1] == f"https://{HOST}"
+    assert judge_argv[judge_argv.index("--expected-host") + 1] == HOST
+    assert result.net == []
+
+    assert json.loads((result.out / "admission.json").read_text())["expected_host"] == HOST
+    assert result.pauses == [{"name": "tier0-qwen", "namespace": "example-org"}]
+    assert not (result.out / "cleanup_failed.txt").exists()
 
 
 def test_shell_failure_after_admission_still_pauses(harness):
-    proc, calls, pauses, out = harness(FAKE_CURL_WAKE_STATUS="503")
-    assert proc.returncode != 0
-    assert "Endpoint not ready (HTTP 503)" in proc.stdout
-    assert len(calls) == 2  # stopped before G2
-    assert not (out / "run_summary.json").exists()
-    assert len(pauses) == 1
+    result = harness(FAKE_CURL_WAKE_STATUS="503")
+    assert result.proc.returncode != 0
+    assert "Endpoint not ready (HTTP 503)" in result.proc.stdout
+    assert len(result.curl) == 2  # stopped before G2
+    assert result.judge == []
+    assert len(result.pauses) == 1
+
+
+def test_shell_pause_failure_after_clean_run_exits_nonzero(harness):
+    result = harness(FAKE_HF_PAUSE_FAIL="1")
+    assert result.proc.returncode == 3
+    assert "PAUSE FAILED" in result.proc.stderr
+    assert (result.out / "cleanup_failed.txt").is_file()
+    assert (result.out / "run_summary.json").is_file()  # transport evidence kept apart
+
+
+def test_shell_pause_failure_keeps_original_failure_status(harness):
+    result = harness(FAKE_HF_PAUSE_FAIL="1", FAKE_CURL_WAKE_STATUS="503")
+    assert result.proc.returncode == 1
+    assert (result.out / "cleanup_failed.txt").is_file()
 
 
 def test_shell_pause_can_be_disabled_after_admission(harness):
-    proc, _, pauses, _ = harness(TIER0_PAUSE_ON_EXIT="0")
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert pauses == []
+    result = harness(TIER0_PAUSE_ON_EXIT="0")
+    assert result.proc.returncode == 0, result.proc.stdout + result.proc.stderr
+    assert result.pauses == []
+
+
+def test_admission_repository_is_the_runner_model_id():
+    assert ADMISSION.expected_repository() == load("tier0_hf_run").MODEL_ID
+    shell = (SCRIPTS / "tier0_codespace.sh").read_text(encoding="utf-8")
+    assert "MODEL_ID" not in shell and "--expected-repository" not in shell

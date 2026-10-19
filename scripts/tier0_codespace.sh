@@ -14,7 +14,6 @@ export HF_API_MODEL="${HF_API_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
 export HF_ENGINE="${HF_ENGINE:-vllm}"
 export RUN_ID="${RUN_ID:-tier0-qwen-hf-001}"
 export HF_REVISION
-MODEL_ID="Qwen/Qwen2.5-0.5B-Instruct"
 TIER0_PAUSE_ON_EXIT="${TIER0_PAUSE_ON_EXIT:-1}"
 TIER0_REPEATS="${TIER0_REPEATS:-3}"
 OUT="${TIER0_OUT_DIR:-results/real-model/${RUN_ID}}"
@@ -29,10 +28,14 @@ cleanup() {
   status=$?
   if [ -n "$ADMITTED_NAME" ] && [ "$TIER0_PAUSE_ON_EXIT" = "1" ]; then
     echo "== cleanup: pausing admitted endpoint $ADMITTED_NAME"
-    python scripts/tier0_admission.py pause --endpoint-name "$ADMITTED_NAME" \
+    if ! python scripts/tier0_admission.py pause --endpoint-name "$ADMITTED_NAME" \
       ${ADMITTED_NAMESPACE:+--namespace "$ADMITTED_NAMESPACE"} \
-      > "$OUT/endpoint_state_after.txt" \
-      || echo "!! PAUSE FAILED: pause it manually in the dashboard NOW"
+      > "$OUT/endpoint_state_after.txt"; then
+      echo "!! PAUSE FAILED: pause it manually in the dashboard NOW" >&2
+      # Kept apart from inference results; a clean run must not report success.
+      echo "$(date -u +%FT%TZ) pause failed for $ADMITTED_NAME" > "$OUT/cleanup_failed.txt"
+      [ "$status" -ne 0 ] || status=3
+    fi
   elif [ -z "$ADMITTED_NAME" ]; then
     echo "== cleanup: endpoint was not admitted; leaving its state unchanged"
   fi
@@ -49,7 +52,8 @@ curl_safe() {
 
 echo "== G0: branch, ignore rule, baseline"
 grep -qx "results/real-model/" .gitignore || { echo "Add 'results/real-model/' to .gitignore first"; exit 1; }
-# TIER0_SKIP_SETUP=1 is for the offline harness tests only; admission still runs.
+# TIER0_SKIP_SETUP=1 skips these setup gates (used by the offline tests). It is
+# not a security boundary: admission and host binding below always run.
 if [ "${TIER0_SKIP_SETUP:-0}" != "1" ]; then
   branch="$(git branch --show-current)"
   if [ "$branch" = "main" ]; then echo "Refusing to run on main"; exit 1; fi
@@ -64,7 +68,6 @@ admission="$(python scripts/tier0_admission.py admit \
   --endpoint-name "$HF_ENDPOINT_NAME" \
   ${HF_ENDPOINT_NAMESPACE:+--namespace "$HF_ENDPOINT_NAMESPACE"} \
   --configured-url "$HF_ENDPOINT_URL" \
-  --expected-repository "$MODEL_ID" \
   --expected-revision "$HF_REVISION")" \
   || { echo "Endpoint admission failed; no token was sent to the inference host." >&2; exit 1; }
 printf '%s\n' "$admission" > "$OUT/admission.json"

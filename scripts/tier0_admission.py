@@ -5,7 +5,10 @@ Admission compares authenticated endpoint metadata with independently approved
 expectations before any bearer token is sent to the inference host:
 
   python scripts/tier0_admission.py admit --endpoint-name NAME \
-      --configured-url URL --expected-repository REPO --expected-revision SHA
+      --configured-url URL --expected-revision SHA
+
+The expected repository is the runner's MODEL_ID (scripts/tier0_hf_run.py), so
+admission and recorded provenance cannot name different models.
 
 On success it prints one JSON object (expected_host, origin, endpoint identity)
 and exits 0. On any failure it prints nothing to stdout and exits 2.
@@ -38,6 +41,15 @@ _spec = importlib.util.spec_from_file_location("hf_endpoint_judge", ROOT / "scri
 assert _spec is not None and _spec.loader is not None
 _adapter = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_adapter)
+
+
+def expected_repository() -> str:
+    """The runner's MODEL_ID: the single source for the admitted repository."""
+    spec = importlib.util.spec_from_file_location("tier0_hf_run", ROOT / "scripts" / "tier0_hf_run.py")
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    return runner.MODEL_ID
 
 
 class AdmissionError(ValueError):
@@ -129,7 +141,6 @@ def main(argv: list[str] | None = None) -> int:
     admit_parser.add_argument("--endpoint-name", required=True)
     admit_parser.add_argument("--namespace")
     admit_parser.add_argument("--configured-url", required=True)
-    admit_parser.add_argument("--expected-repository", required=True)
     admit_parser.add_argument("--expected-revision", required=True)
     pause_parser = sub.add_parser("pause")
     pause_parser.add_argument("--endpoint-name", required=True)
@@ -141,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             result = admit(
                 fetch_metadata(args.endpoint_name, args.namespace or None),
                 configured_url=args.configured_url,
-                expected_repository=args.expected_repository,
+                expected_repository=expected_repository(),
                 expected_revision=args.expected_revision,
             )
             sys.stdout.write(json.dumps(result, sort_keys=True) + "\n")
