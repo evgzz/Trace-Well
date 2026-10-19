@@ -18,7 +18,7 @@ The output has one JSONL row with:
 
 - a stable `id` from the CasePair identity and version;
 - a textual `input` explicitly marked **NON-EXECUTABLE**;
-- `metadata.tracewell_case_pair` containing the lossless, schema-validated CasePair;
+- `metadata.tracewell_case_pair` containing the **model-lossless**, schema-validated CasePair (all validated model fields are preserved; YAML whitespace, comments, formatting and source bytes are not);
 - source-file SHA-256 distinct from TRACE-Well's canonical artifact digest;
 - **no `target`**, no solver, no scorer, no scored result.
 
