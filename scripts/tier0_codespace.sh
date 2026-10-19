@@ -15,6 +15,23 @@ export HF_ENGINE="${HF_ENGINE:-vllm}"
 export RUN_ID="${RUN_ID:-tier0-qwen-hf-001}"
 export HF_REVISION
 TIER0_PAUSE_ON_EXIT="${TIER0_PAUSE_ON_EXIT:-1}"
+TIER0_PAUSE_CONFIRM_SECONDS="${TIER0_PAUSE_CONFIRM_SECONDS:-300}"
+TIER0_PAUSE_POLL_SECONDS="${TIER0_PAUSE_POLL_SECONDS:-5}"
+# End-to-end bound on the pause command, including a blocked control-plane call.
+TIER0_PAUSE_COMMAND_SECONDS="${TIER0_PAUSE_COMMAND_SECONDS:-420}"
+
+# Checked before admission: a bad value found only at cleanup would leave the
+# endpoint running. GNU timeout treats "inf" and "0" as no limit, so plain
+# positive decimals only.
+positive_seconds() {
+  [[ "$2" =~ ^[0-9]+([.][0-9]+)?$ ]] && ! [[ "$2" =~ ^0+([.]0+)?$ ]] \
+    || { echo "$1 must be a positive number of seconds (got '$2')" >&2; exit 2; }
+}
+positive_seconds TIER0_PAUSE_CONFIRM_SECONDS "$TIER0_PAUSE_CONFIRM_SECONDS"
+positive_seconds TIER0_PAUSE_POLL_SECONDS "$TIER0_PAUSE_POLL_SECONDS"
+positive_seconds TIER0_PAUSE_COMMAND_SECONDS "$TIER0_PAUSE_COMMAND_SECONDS"
+awk -v a="$TIER0_PAUSE_COMMAND_SECONDS" -v b="$TIER0_PAUSE_CONFIRM_SECONDS" 'BEGIN { exit !(a > b) }' \
+  || { echo "TIER0_PAUSE_COMMAND_SECONDS must exceed TIER0_PAUSE_CONFIRM_SECONDS" >&2; exit 2; }
 TIER0_REPEATS="${TIER0_REPEATS:-3}"
 OUT="${TIER0_OUT_DIR:-results/real-model/${RUN_ID}}"
 export OUT
@@ -28,10 +45,11 @@ cleanup() {
   status=$?
   if [ -n "$ADMITTED_NAME" ] && [ "$TIER0_PAUSE_ON_EXIT" = "1" ]; then
     echo "== cleanup: pausing admitted endpoint $ADMITTED_NAME"
-    if ! python scripts/tier0_admission.py pause --endpoint-name "$ADMITTED_NAME" \
+    if ! timeout --kill-after=10 "$TIER0_PAUSE_COMMAND_SECONDS" \
+      python scripts/tier0_admission.py pause --endpoint-name "$ADMITTED_NAME" \
       ${ADMITTED_NAMESPACE:+--namespace "$ADMITTED_NAMESPACE"} \
-      --confirm-timeout "${TIER0_PAUSE_CONFIRM_SECONDS:-300}" \
-      --poll-interval "${TIER0_PAUSE_POLL_SECONDS:-5}" \
+      --confirm-timeout "$TIER0_PAUSE_CONFIRM_SECONDS" \
+      --poll-interval "$TIER0_PAUSE_POLL_SECONDS" \
       > "$OUT/endpoint_state_after.txt"; then
       echo "!! PAUSE NOT CONFIRMED: pause it manually in the dashboard NOW" >&2
       # Kept apart from inference results; a clean run must not report success.

@@ -197,6 +197,9 @@ class _Endpoint:
         self.revision = meta.get("revision")
 
     def pause(self):
+        if os.environ.get("FAKE_HF_PAUSE_HANG"):
+            import time
+            time.sleep(float(os.environ["FAKE_HF_PAUSE_HANG"]))
         if os.environ.get("FAKE_HF_PAUSE_FAIL") == "1":
             raise RuntimeError("simulated pause failure")
         with open(os.environ["FAKE_HF_PAUSE_LOG"], "a") as handle:
@@ -295,6 +298,7 @@ def harness(tmp_path):
             TIER0_OUT_DIR=str(out),
             TIER0_PAUSE_CONFIRM_SECONDS="0.5",
             TIER0_PAUSE_POLL_SECONDS="0.05",
+            TIER0_PAUSE_COMMAND_SECONDS="20",
             FAKE_HF_METADATA=json.dumps(metadata() if meta is None else meta),
             FAKE_HF_PAUSE_LOG=str(logs["pause"]),
             FAKE_CURL_LOG=str(logs["curl"]),
@@ -510,3 +514,71 @@ def test_pause_request_error_propagates_without_polling():
     with pytest.raises(RuntimeError, match="api down"):
         run_pause(endpoint)
     assert endpoint.fetch_calls == 0
+
+
+# --- pause settings are validated and the wait is bounded ---------------------
+
+
+@pytest.mark.parametrize("flag", ["--confirm-timeout", "--poll-interval"])
+@pytest.mark.parametrize("value", ["inf", "-inf", "nan", "0", "0.0", "-1", "abc"])
+def test_pause_cli_rejects_invalid_seconds(flag, value, capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        ADMISSION.main(["pause", "--endpoint-name", "tier0-qwen", flag, value])
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    if not value.startswith("-") and value != "abc":  # argparse reads "-x" as an option
+        assert "greater than 0" in err
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"confirm_timeout": float("inf")}, {"confirm_timeout": float("nan")}, {"confirm_timeout": 0},
+    {"poll_interval": float("inf")}, {"poll_interval": float("nan")}, {"poll_interval": 0},
+])
+def test_pause_rejects_invalid_seconds_before_any_call(kwargs):
+    looked_up = []
+    with pytest.raises(ValueError, match="greater than 0"):
+        ADMISSION.pause("tier0-qwen", lookup=lambda *a: looked_up.append(a), **kwargs)
+    assert looked_up == []  # no control-plane call, no pause request
+
+
+def test_poll_sleep_never_passes_the_deadline():
+    endpoint = FakeEndpoint(["running"])
+    with pytest.raises(ADMISSION.AdmissionError, match="not confirmed"):
+        clock = FakeClock()
+        try:
+            ADMISSION.pause(
+                "tier0-qwen", confirm_timeout=30.0, poll_interval=50.0,
+                lookup=lambda *a: endpoint, sleep=clock.sleep, clock=clock,
+            )
+        finally:
+            assert clock.now == 30.0  # slept 30, not 50
+    assert endpoint.fetch_calls == 2
+
+
+@pytest.mark.parametrize("name", [
+    "TIER0_PAUSE_CONFIRM_SECONDS", "TIER0_PAUSE_POLL_SECONDS", "TIER0_PAUSE_COMMAND_SECONDS",
+])
+@pytest.mark.parametrize("value", ["inf", "nan", "0", "0.0", "-1", "1e3", "abc"])
+def test_shell_rejects_invalid_pause_settings_before_admission(harness, name, value):
+    result = harness(**{name: value})
+    assert result.proc.returncode == 2
+    assert name in result.proc.stderr
+    assert result.curl == [] and result.pauses == []
+    assert not (result.out / "admission.json").exists()
+    assert_protected_paths_untouched(result)
+
+
+def test_shell_requires_command_bound_above_confirm_wait(harness):
+    result = harness(TIER0_PAUSE_CONFIRM_SECONDS="30", TIER0_PAUSE_COMMAND_SECONDS="30")
+    assert result.proc.returncode == 2
+    assert "must exceed" in result.proc.stderr
+    assert result.curl == []
+
+
+@pytest.mark.skipif(shutil.which("timeout") is None, reason="GNU timeout unavailable")
+def test_shell_blocked_pause_call_is_bounded_and_fails(harness):
+    result = harness(FAKE_HF_PAUSE_HANG="60", TIER0_PAUSE_COMMAND_SECONDS="1")
+    assert result.proc.returncode == 3
+    assert "PAUSE NOT CONFIRMED" in result.proc.stderr
+    assert (result.out / "cleanup_failed.txt").is_file()
+    assert (result.out / "run_summary.json").is_file()

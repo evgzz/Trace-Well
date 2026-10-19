@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -64,6 +65,19 @@ class AdmissionError(ValueError):
 def _status_text(status: Any) -> str | None:
     value = getattr(status, "value", status)
     return value if isinstance(value, str) else None
+
+
+def _require_positive_seconds(value: float, name: str) -> float:
+    if not (isinstance(value, (int, float)) and math.isfinite(value) and value > 0):
+        raise ValueError(f"{name} must be a finite number of seconds greater than 0")
+    return value
+
+
+def _seconds_arg(text: str) -> float:
+    try:
+        return _require_positive_seconds(float(text), "value")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _live_lookup(name: str, namespace: str | None):
@@ -148,7 +162,12 @@ def pause(
 
     The pause mutation is issued once; only the state is re-read. Raises
     AdmissionError if ``paused`` is not confirmed within ``confirm_timeout``.
+    The deadline bounds the polling loop only; a control-plane call that
+    blocks is bounded by the caller (tier0_codespace.sh wraps this command
+    in ``timeout``).
     """
+    _require_positive_seconds(confirm_timeout, "confirm_timeout")
+    _require_positive_seconds(poll_interval, "poll_interval")
     endpoint = lookup(name, namespace)
     endpoint.pause()
     deadline = clock() + confirm_timeout
@@ -159,7 +178,8 @@ def pause(
             return state
         if clock() >= deadline:
             raise AdmissionError(f"pause not confirmed within {confirm_timeout:g}s; last state {state!r}")
-        sleep(poll_interval)
+        # Never sleep past the deadline, so the wait stays bounded by confirm_timeout.
+        sleep(min(poll_interval, max(0.0, deadline - clock())))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -173,8 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     pause_parser = sub.add_parser("pause")
     pause_parser.add_argument("--endpoint-name", required=True)
     pause_parser.add_argument("--namespace")
-    pause_parser.add_argument("--confirm-timeout", type=float, default=DEFAULT_PAUSE_CONFIRM_SECONDS)
-    pause_parser.add_argument("--poll-interval", type=float, default=DEFAULT_PAUSE_POLL_SECONDS)
+    pause_parser.add_argument("--confirm-timeout", type=_seconds_arg, default=DEFAULT_PAUSE_CONFIRM_SECONDS)
+    pause_parser.add_argument("--poll-interval", type=_seconds_arg, default=DEFAULT_PAUSE_POLL_SECONDS)
     args = parser.parse_args(argv)
 
     try:
