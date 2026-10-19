@@ -20,18 +20,31 @@ TIER0_PAUSE_POLL_SECONDS="${TIER0_PAUSE_POLL_SECONDS:-5}"
 # End-to-end bound on the pause command, including a blocked control-plane call.
 TIER0_PAUSE_COMMAND_SECONDS="${TIER0_PAUSE_COMMAND_SECONDS:-420}"
 
+# Per-request limits for the G1/G2 curl calls. The wake-up asks the endpoint
+# to scale up for up to 600 s, so the request limit must exceed that.
+TIER0_CURL_CONNECT_SECONDS="${TIER0_CURL_CONNECT_SECONDS:-30}"
+TIER0_CURL_MAX_SECONDS="${TIER0_CURL_MAX_SECONDS:-660}"
+SCALE_UP_TIMEOUT_SECONDS=600
+
 # Checked before admission: a bad value found only at cleanup would leave the
-# endpoint running. GNU timeout treats "inf" and "0" as no limit, so plain
-# positive decimals only.
+# endpoint running. GNU timeout treats "inf" and "0" as no limit, and an
+# overlong decimal converts to inf in Python and awk, so accept only short
+# positive decimals: at most 5 integer and 3 fractional digits (< 100000 s).
 positive_seconds() {
-  [[ "$2" =~ ^[0-9]+([.][0-9]+)?$ ]] && ! [[ "$2" =~ ^0+([.]0+)?$ ]] \
-    || { echo "$1 must be a positive number of seconds (got '$2')" >&2; exit 2; }
+  [[ "$2" =~ ^[0-9]{1,5}([.][0-9]{1,3})?$ ]] && ! [[ "$2" =~ ^0+([.]0+)?$ ]] \
+    || { echo "$1 must be a positive number of seconds below 100000 (got '$2')" >&2; exit 2; }
+}
+must_exceed() {
+  awk -v a="$2" -v b="$3" 'BEGIN { exit !(a > b) }' \
+    || { echo "$1 must exceed $4" >&2; exit 2; }
 }
 positive_seconds TIER0_PAUSE_CONFIRM_SECONDS "$TIER0_PAUSE_CONFIRM_SECONDS"
 positive_seconds TIER0_PAUSE_POLL_SECONDS "$TIER0_PAUSE_POLL_SECONDS"
 positive_seconds TIER0_PAUSE_COMMAND_SECONDS "$TIER0_PAUSE_COMMAND_SECONDS"
-awk -v a="$TIER0_PAUSE_COMMAND_SECONDS" -v b="$TIER0_PAUSE_CONFIRM_SECONDS" 'BEGIN { exit !(a > b) }' \
-  || { echo "TIER0_PAUSE_COMMAND_SECONDS must exceed TIER0_PAUSE_CONFIRM_SECONDS" >&2; exit 2; }
+positive_seconds TIER0_CURL_CONNECT_SECONDS "$TIER0_CURL_CONNECT_SECONDS"
+positive_seconds TIER0_CURL_MAX_SECONDS "$TIER0_CURL_MAX_SECONDS"
+must_exceed TIER0_PAUSE_COMMAND_SECONDS "$TIER0_PAUSE_COMMAND_SECONDS" "$TIER0_PAUSE_CONFIRM_SECONDS" TIER0_PAUSE_CONFIRM_SECONDS
+must_exceed TIER0_CURL_MAX_SECONDS "$TIER0_CURL_MAX_SECONDS" "$SCALE_UP_TIMEOUT_SECONDS" "the ${SCALE_UP_TIMEOUT_SECONDS}s scale-up timeout"
 TIER0_REPEATS="${TIER0_REPEATS:-3}"
 OUT="${TIER0_OUT_DIR:-results/real-model/${RUN_ID}}"
 export OUT
@@ -64,10 +77,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Authenticated calls to the inference host: no user curl config, HTTPS only,
-# no redirects, explicit status checks by the caller.
+# Calls to the inference host: no user curl config, HTTPS only, no redirects,
+# connect and total-time limits, explicit status checks by the caller.
 curl_safe() {
-  curl -q --proto '=https' --max-redirs 0 -sS "$@"
+  curl -q --proto '=https' --max-redirs 0 -sS \
+    --connect-timeout "$TIER0_CURL_CONNECT_SECONDS" --max-time "$TIER0_CURL_MAX_SECONDS" "$@"
 }
 
 echo "== G0: branch, ignore rule, baseline"
@@ -106,7 +120,7 @@ anon="$(curl_safe -o /dev/null -w '%{http_code}' "$HF_ENDPOINT_URL/v1/models")" 
 echo "no-token status: $anon"
 case "$anon" in 401|403) ;; *) echo "!! unauthenticated call was not rejected ($anon)"; exit 1 ;; esac
 code="$(curl_safe --fail-with-body -o "$OUT/models.json" -w '%{http_code}' \
-  -H "Authorization: Bearer $HF_TOKEN" -H "X-Scale-Up-Timeout: 600" \
+  -H "Authorization: Bearer $HF_TOKEN" -H "X-Scale-Up-Timeout: $SCALE_UP_TIMEOUT_SECONDS" \
   "$HF_ENDPOINT_URL/v1/models")" \
   || { echo "Authenticated wake-up request failed; stopping." >&2; exit 1; }
 echo "token status: $code"

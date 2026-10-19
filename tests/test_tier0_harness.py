@@ -367,6 +367,8 @@ def test_shell_admitted_run_reaches_every_path_on_admitted_origin(harness, state
         assert argv[:2] == ["-q", "--proto"] and argv[2] == "=https"
         assert "--max-redirs" in argv and argv[argv.index("--max-redirs") + 1] == "0"
         assert "-L" not in argv and "--location" not in argv
+        assert argv[argv.index("--connect-timeout") + 1] == "30"
+        assert argv[argv.index("--max-time") + 1] == "660"
         url = next(a for a in argv if a.startswith("http"))
         assert url.startswith(f"https://{HOST}/v1/")
     assert [any(a.startswith("Authorization:") for a in c) for c in result.curl] == [False, True, True]
@@ -557,15 +559,27 @@ def test_poll_sleep_never_passes_the_deadline():
 
 @pytest.mark.parametrize("name", [
     "TIER0_PAUSE_CONFIRM_SECONDS", "TIER0_PAUSE_POLL_SECONDS", "TIER0_PAUSE_COMMAND_SECONDS",
+    "TIER0_CURL_CONNECT_SECONDS", "TIER0_CURL_MAX_SECONDS",
 ])
-@pytest.mark.parametrize("value", ["inf", "nan", "0", "0.0", "-1", "1e3", "abc"])
-def test_shell_rejects_invalid_pause_settings_before_admission(harness, name, value):
+@pytest.mark.parametrize("value", [
+    "inf", "nan", "0", "0.0", "-1", "1e3", "abc",
+    "1" * 400,  # decimal syntax, but inf in Python and awk
+    "100000", "1.2345",
+])
+def test_shell_rejects_invalid_timing_settings_before_admission(harness, name, value):
     result = harness(**{name: value})
     assert result.proc.returncode == 2
     assert name in result.proc.stderr
     assert result.curl == [] and result.pauses == []
     assert not (result.out / "admission.json").exists()
     assert_protected_paths_untouched(result)
+
+
+def test_shell_requires_curl_limit_above_scale_up_timeout(harness):
+    result = harness(TIER0_CURL_MAX_SECONDS="600")
+    assert result.proc.returncode == 2
+    assert "scale-up timeout" in result.proc.stderr
+    assert result.curl == []
 
 
 def test_shell_requires_command_bound_above_confirm_wait(harness):
