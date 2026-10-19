@@ -198,9 +198,9 @@ The Transport section above refuses redirects, so the bearer token can only reac
 1. **An expected host is required for HTTPS.** `scripts/hf_endpoint_judge.py` refuses an HTTPS endpoint unless `--expected-host` is supplied. The operator obtains that hostname from authenticated endpoint control-plane metadata, never by parsing the base URL.
 2. **Exact host equality.** The base URL's hostname must equal `--expected-host`, compared case-insensitively. `--expected-host` must be a single DNS hostname; subdomains, suffixes and wildcards are not accepted.
 3. **The base URL is an HTTPS origin with an optional `/v1` prefix.** The path may be empty, `/`, `/v1` or `/v1/`. The port may be omitted or an explicit `443`; any other port is rejected. The URL is also rejected if it contains whitespace or control characters, a username or password, a query string or a fragment.
-4. **Validation before any network call.** All checks run before the token-bearing request. The request URL is rebuilt as `https://<host>[:443]/v1/chat/completions`, so no part of the input path is reused.
-5. **Cleartext HTTP is for tests only.** It requires `--allow-http-endpoint` and a loopback host (`127.0.0.1`, `localhost` or `::1`).
-6. **Redirect refusal** is unchanged from the Transport section above.
+4. **Validation before the bearer-token inference request.** Destination validation completes before the adapter issues a bearer-token inference request. Authenticated endpoint control-plane lookup is a separate permitted operation. After validation, the adapter constructs `/v1/chat/completions` from the validated scheme and authority, preserving an explicitly permitted `:443` when present; no part of the input path is reused.
+5. **Cleartext HTTP is for tests only.** It requires `--allow-http-endpoint` and a loopback host (`127.0.0.1`, `localhost` or `::1`). This exception does not relax the HTTPS host-binding rules.
+6. **Redirect refusal** is unchanged from the Transport section above. Destination validation and redirect refusal are independent, complementary controls: one checks the first hop, the other prevents leaving it.
 7. **Direct requests outside the adapter**, as documented in `docs/V1.6_REAL_MODEL_RUNBOOK.md` and `docs/V1.6_EVALUATION_PLAN.md`:
    - obtain `HF_EXPECTED_HOST` from the control plane before any token-bearing inference request;
    - validate the endpoint URL with the same rules;
@@ -213,6 +213,9 @@ The Transport section above refuses redirects, so the bearer token can only reac
 - The check is only as independent as the source of the expected host.
 - It does not certify which model weights the endpoint serves.
 - The adapter cannot protect a standalone `curl` request; the runbook rules above apply there.
+- The expected host is obtained from the control plane at one point in time. The binding does not continuously verify the deployment afterwards.
+- The request payload sent is not the server-rendered prompt; see `request_payload_digest` versus `rendered_prompt_digest` in the Decision above.
+- Hosted transport that satisfies this binding is not calibration evidence; ADR-0015 Stage A and later stages still apply.
 
 ### Related experimental work — not approved by this amendment
 
@@ -222,7 +225,7 @@ These controls remain experimental. Adopting them requires a separately proposed
 
 ### Consequences
 
-- A misdirected first hop is rejected before the token leaves the process; the operator sees an error, not a leaked credential.
+- Destination validation reduces the risk of delivering inference credentials to an unapproved first-hop endpoint. It does not eliminate all credential-exposure risks.
 - Every HTTPS invocation without `--expected-host` now fails closed. Callers, including any experiment harness, must supply it.
 
 ## Consequences
