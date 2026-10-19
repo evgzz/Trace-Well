@@ -6,7 +6,7 @@ set -euo pipefail
 
 : "${HF_TOKEN:?Set HF_TOKEN as a Codespaces secret, then restart the codespace}"
 : "${HF_ENDPOINT_URL:?export HF_ENDPOINT_URL=https://<endpoint-host>}"
-export HF_ENDPOINT_NAME="${HF_ENDPOINT_NAME:-qwen2-5-0-5b-instruct-vqa}"
+export HF_ENDPOINT_NAME="${HF_ENDPOINT_NAME:?set HF_ENDPOINT_NAME to your endpoint name}"
 export HF_API_MODEL="${HF_API_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
 export HF_REVISION="${HF_REVISION:-7ae557604adf67be50417f59c2c2f167def9a775}"
 export HF_ENGINE="${HF_ENGINE:-vllm}"
