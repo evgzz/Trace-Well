@@ -34,7 +34,7 @@ Not every historical/indexed decision has a standalone file in this repository s
 | 0018 | CI and publication gating | Accepted | AGENTS / CI |
 | 0019 | No hidden chain-of-thought capture | Accepted | ARCHITECTURE / LIMITATIONS |
 | 0020 | Canonical artifact normalization | Accepted | ARCHITECTURE / REPRODUCIBILITY |
-| 0021 | Judge provenance binding (Amendment 1 accepted and implemented) | Proposed | V1.6_SCOPE |
+| 0021 | Judge provenance binding (Amendment 1 accepted and implemented; Amendment 2 proposed) | Proposed | V1.6_SCOPE |
 | 0022 | τ³ experimental boundary and evidence-producer contract | Proposed | ENGINEERING_CONTEXT / TAU3_TEST_SOURCE_AUDIT |
 
 ## Full ADR files in this snapshot

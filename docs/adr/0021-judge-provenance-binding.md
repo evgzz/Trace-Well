@@ -183,6 +183,51 @@ Moving two fields out of `ExpectedJudgeIdentity` is a breaking schema change for
 - **Exact equality for `generation_parameters`.** Rejected: callers would have to restate every server default (`top_p`, `max_tokens`, …) to pin a single parameter.
 - **A sentinel for "must be unseeded".** Deferred; see the seed limitation above.
 
+## Amendment 2 — Credential destination binding
+
+**Status:** Proposed. Written after implementation in PR #20 (merged at `3767c43`); maintainer acceptance pending. Amendment 1 and its Accepted status are unchanged, and ADR-0021 as a whole remains Proposed.
+
+**Chronology.** `AGENTS.md` requires a Proposed ADR before an uncovered load-bearing V1.6 choice is implemented. This rule was implemented in PR #20 first and recorded here afterwards. This amendment repairs the missing architectural record; it does not satisfy, or retroactively change, the before-implementation ordering.
+
+### Problem
+
+The Transport section above refuses redirects, so the bearer token can only reach the first-hop URL. It does not define which first hop is acceptable. A mistyped, look-alike or tampered base URL would still receive the token.
+
+### Decision
+
+1. **An expected host is required for HTTPS.** `scripts/hf_endpoint_judge.py` refuses an HTTPS endpoint unless `--expected-host` is supplied. The operator obtains that hostname from authenticated endpoint control-plane metadata, never by parsing the base URL.
+2. **Exact host equality.** The base URL's hostname must equal `--expected-host`, compared case-insensitively. `--expected-host` must be a single DNS hostname; subdomains, suffixes and wildcards are not accepted.
+3. **The base URL is an HTTPS origin with an optional `/v1` prefix.** The path may be empty, `/`, `/v1` or `/v1/`. The port may be omitted or an explicit `443`; any other port is rejected. The URL is also rejected if it contains whitespace or control characters, a username or password, a query string or a fragment.
+4. **Validation before the bearer-token inference request.** Destination validation completes before the adapter issues a bearer-token inference request. Authenticated endpoint control-plane lookup is a separate permitted operation. After validation, the adapter constructs `/v1/chat/completions` from the validated scheme and authority, preserving an explicitly permitted `:443` when present; no part of the input path is reused.
+5. **Cleartext HTTP is for tests only.** It requires `--allow-http-endpoint` and a loopback host (`127.0.0.1`, `localhost` or `::1`). This exception does not relax the HTTPS host-binding rules.
+6. **Redirect refusal** is unchanged from the Transport section above. Destination validation and redirect refusal are independent, complementary controls: one checks the first hop, the other prevents leaving it.
+7. **Direct requests outside the adapter**, as documented in `docs/V1.6_REAL_MODEL_RUNBOOK.md` and `docs/V1.6_EVALUATION_PLAN.md`:
+   - obtain `HF_EXPECTED_HOST` from the control plane before any token-bearing inference request;
+   - validate the endpoint URL with the same rules;
+   - use `curl -q --proto '=https'` without following redirects;
+   - require HTTP 200 for authenticated requests; an anonymous authorization probe, where used, expects 401 or 403;
+   - run admission and the requests in one script scope, stopping on any failure.
+
+### Limits
+
+- The check is only as independent as the source of the expected host.
+- It does not certify which model weights the endpoint serves.
+- The adapter cannot protect a standalone `curl` request; the runbook rules above apply there.
+- The expected host is obtained from the control plane at one point in time. The binding does not continuously verify the deployment afterwards.
+- The request payload sent is not the server-rendered prompt; see `request_payload_digest` versus `rendered_prompt_digest` in the Decision above.
+- Hosted transport that satisfies this binding is not calibration evidence; ADR-0015 Stage A and later stages still apply.
+
+### Related experimental work — not approved by this amendment
+
+Draft PR #21 implements additional hosted-endpoint admission controls: authenticated metadata lookup, repository and immutable-revision matching, an endpoint-state allowlist, admitted-origin propagation, and admission-guarded cleanup.
+
+These controls remain experimental. Draft PR #21 now includes offline-tested pause-state confirmation with bounded polling. Its endpoint lifecycle policy has not been accepted into the architecture or qualified against a live endpoint; adopting it requires a separately proposed architectural decision. This amendment does not authorize merging PR #21, executing hosted inference, or changing V1.6 acceptance status.
+
+### Consequences
+
+- Destination validation reduces the risk of delivering inference credentials to an unapproved first-hop endpoint. It does not eliminate all credential-exposure risks.
+- Every HTTPS invocation without `--expected-host` now fails closed. Callers, including any experiment harness, must supply it.
+
 ## Consequences
 
 - Provenance answers "what judge ran, on what bytes?" from computed evidence, not operator assertion.
