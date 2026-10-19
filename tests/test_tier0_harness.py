@@ -306,6 +306,8 @@ def harness(tmp_path):
             FAKE_NET_LOG=str(logs["net"]),
         )
         env.update(env_overrides)
+        if "TIER0_BUDGET_ACK" not in env_overrides:
+            env["TIER0_BUDGET_ACK"] = expected_budget_id(env)
         proc = subprocess.run(
             ["bash", str(SCRIPTS / "tier0_codespace.sh")],
             cwd=ROOT, env=env, capture_output=True, text=True, timeout=120,
@@ -316,6 +318,29 @@ def harness(tmp_path):
         )
 
     return run
+
+
+def git_state():
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
+    return commit, dirty
+
+
+def expected_budget_id(env):
+    """The id the script will print for this environment, or a placeholder if invalid."""
+    commit, dirty = git_state()
+    try:
+        return ADMISSION.budget_report(
+            commit=commit, worktree_dirty=dirty, repeats=int(env.get("TIER0_REPEATS", "3")),
+            curl_connect_seconds=float(env.get("TIER0_CURL_CONNECT_SECONDS", "30")),
+            curl_max_seconds=float(env.get("TIER0_CURL_MAX_SECONDS", "660")),
+            pause_confirm_seconds=float(env.get("TIER0_PAUSE_CONFIRM_SECONDS", "300")),
+            pause_poll_seconds=float(env.get("TIER0_PAUSE_POLL_SECONDS", "5")),
+            pause_command_seconds=float(env.get("TIER0_PAUSE_COMMAND_SECONDS", "420")),
+            pause_kill_grace_seconds=10.0,
+        )["budget_id"]
+    except ValueError:
+        return "not-computable"
 
 
 def token_calls(result):
@@ -596,3 +621,93 @@ def test_shell_blocked_pause_call_is_bounded_and_fails(harness):
     assert "PAUSE NOT CONFIRMED" in result.proc.stderr
     assert (result.out / "cleanup_failed.txt").is_file()
     assert (result.out / "run_summary.json").is_file()
+
+
+# --- budget report and acknowledgment -----------------------------------------
+
+BUDGET_KWARGS = dict(
+    commit="0" * 40, worktree_dirty=False, repeats=3, curl_connect_seconds=30.0,
+    curl_max_seconds=660.0, pause_confirm_seconds=300.0, pause_poll_seconds=5.0,
+    pause_command_seconds=420.0, pause_kill_grace_seconds=10.0, judge_timeout_seconds=150.0,
+)
+
+
+def test_budget_sums_bounded_stages_and_lists_exclusions():
+    report = ADMISSION.budget_report(**BUDGET_KWARGS)
+    assert report["components"] == {
+        "g1_g2_curl_seconds": 1980.0, "g3_g4_judge_seconds": 450.0, "cleanup_seconds": 430.0,
+    }
+    assert report["bounded_stages_total_seconds"] == 2860.0
+    assert any("admission lookup" in item for item in report["excluded"])
+    assert any("billing" in item for item in report["excluded"])
+    assert "not a guaranteed maximum" in report["note"]
+    text = ADMISSION.format_budget(report)
+    assert "not a cost cap" in text and report["budget_id"] in text
+
+
+def test_budget_uses_the_pipeline_judge_timeout():
+    from tracewell.semantic_judge import DEFAULT_JUDGE_TIMEOUT_SECONDS
+
+    kwargs = dict(BUDGET_KWARGS)
+    del kwargs["judge_timeout_seconds"]
+    report = ADMISSION.budget_report(**kwargs)
+    assert report["settings"]["judge_timeout_seconds"] == DEFAULT_JUDGE_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("change", [
+    {"commit": "1" * 40}, {"worktree_dirty": True}, {"repeats": 4}, {"curl_max_seconds": 661.0},
+    {"curl_connect_seconds": 31.0}, {"pause_confirm_seconds": 301.0}, {"pause_poll_seconds": 6.0},
+    {"pause_command_seconds": 421.0}, {"pause_kill_grace_seconds": 11.0}, {"judge_timeout_seconds": 151.0},
+])
+def test_budget_id_changes_with_every_input(change):
+    base = ADMISSION.budget_report(**BUDGET_KWARGS)["budget_id"]
+    assert ADMISSION.budget_report(**{**BUDGET_KWARGS, **change})["budget_id"] != base
+    assert ADMISSION.budget_report(**BUDGET_KWARGS)["budget_id"] == base  # deterministic
+
+
+@pytest.mark.parametrize("repeats", [0, 11, -1, True, 1.0, "3"])
+def test_budget_rejects_invalid_repeats(repeats):
+    with pytest.raises(ValueError, match="repeats"):
+        ADMISSION.budget_report(**{**BUDGET_KWARGS, "repeats": repeats})
+
+
+@pytest.mark.parametrize("ack", [None, "", "000000000000", "wrong"])
+def test_shell_stops_before_admission_without_matching_ack(harness, ack):
+    overrides = {"TIER0_BUDGET_ACK": ack} if ack is not None else {"TIER0_BUDGET_ACK": ""}
+    result = harness(**overrides)
+    assert result.proc.returncode == 2
+    assert "Budget not acknowledged" in result.proc.stderr
+    assert "bounded total" in result.proc.stdout and "not a cost cap" in result.proc.stdout
+    report = json.loads((result.out / "budget_report.json").read_text())
+    assert f"TIER0_BUDGET_ACK={report['budget_id']}" in result.proc.stderr
+    assert report["commit"] == git_state()[0]
+    assert not (result.out / "admission.json").exists()
+    assert result.curl == [] and result.pauses == []
+    assert_protected_paths_untouched(result)
+
+
+def test_shell_ack_is_bound_to_the_configuration(harness):
+    stale = expected_budget_id({"TIER0_REPEATS": "1"})
+    result = harness(TIER0_REPEATS="2", TIER0_BUDGET_ACK=stale)
+    assert result.proc.returncode == 2
+    assert "Budget not acknowledged" in result.proc.stderr
+    assert result.curl == []
+
+
+@pytest.mark.parametrize("repeats", ["0", "11", "-1", "abc", "1.5", "100", ""])
+def test_shell_rejects_invalid_repeats_before_budget(harness, repeats):
+    result = harness(TIER0_REPEATS=repeats, TIER0_BUDGET_ACK="x")
+    if repeats == "":  # empty falls back to the default of 3
+        assert "Budget not acknowledged" in result.proc.stderr
+    else:
+        assert "TIER0_REPEATS must be an integer from 1 to 10" in result.proc.stderr
+        assert not (result.out / "budget_report.json").exists()
+    assert result.proc.returncode == 2
+    assert result.curl == [] and result.pauses == []
+
+
+def test_shell_acknowledged_run_records_the_budget(harness):
+    result = harness()
+    assert result.proc.returncode == 0, result.proc.stdout + result.proc.stderr
+    report = json.loads((result.out / "budget_report.json").read_text())
+    assert report["repeats"] == 1 and report["commit"] == git_state()[0]

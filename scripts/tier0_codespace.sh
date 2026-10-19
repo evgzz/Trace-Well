@@ -46,9 +46,32 @@ positive_seconds TIER0_CURL_MAX_SECONDS "$TIER0_CURL_MAX_SECONDS"
 must_exceed TIER0_PAUSE_COMMAND_SECONDS "$TIER0_PAUSE_COMMAND_SECONDS" "$TIER0_PAUSE_CONFIRM_SECONDS" TIER0_PAUSE_CONFIRM_SECONDS
 must_exceed TIER0_CURL_MAX_SECONDS "$TIER0_CURL_MAX_SECONDS" "$SCALE_UP_TIMEOUT_SECONDS" "the ${SCALE_UP_TIMEOUT_SECONDS}s scale-up timeout"
 TIER0_REPEATS="${TIER0_REPEATS:-3}"
+[[ "$TIER0_REPEATS" =~ ^[0-9]{1,2}$ ]] && (( 10#$TIER0_REPEATS >= 1 && 10#$TIER0_REPEATS <= 10 )) \
+  || { echo "TIER0_REPEATS must be an integer from 1 to 10 (got '$TIER0_REPEATS')" >&2; exit 2; }
+TIER0_REPEATS=$((10#$TIER0_REPEATS))
+PAUSE_KILL_GRACE_SECONDS=10
 OUT="${TIER0_OUT_DIR:-results/real-model/${RUN_ID}}"
 export OUT
 mkdir -p "$OUT"
+
+# Budget report before anything else runs. The total covers the bounded stages
+# only; it is not a guaranteed maximum run time or cost cap. The operator must
+# acknowledge this exact report (commit, repeats, limits) by its budget id.
+commit="$(git rev-parse HEAD)"
+dirty=""
+[ -z "$(git status --porcelain)" ] || dirty="--worktree-dirty"
+python scripts/tier0_admission.py budget --commit "$commit" $dirty \
+  --repeats "$TIER0_REPEATS" \
+  --curl-connect-seconds "$TIER0_CURL_CONNECT_SECONDS" --curl-max-seconds "$TIER0_CURL_MAX_SECONDS" \
+  --pause-confirm-seconds "$TIER0_PAUSE_CONFIRM_SECONDS" --pause-poll-seconds "$TIER0_PAUSE_POLL_SECONDS" \
+  --pause-command-seconds "$TIER0_PAUSE_COMMAND_SECONDS" --pause-kill-grace-seconds "$PAUSE_KILL_GRACE_SECONDS" \
+  --json-out "$OUT/budget_report.json" \
+  || { echo "Could not compute the run budget; stopping before admission." >&2; exit 2; }
+budget_id="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["budget_id"])' "$OUT/budget_report.json")"
+if [ "${TIER0_BUDGET_ACK:-}" != "$budget_id" ]; then
+  echo "Budget not acknowledged. Review the report above, then rerun with TIER0_BUDGET_ACK=$budget_id" >&2
+  exit 2
+fi
 
 # Set only after admission succeeds; cleanup acts on this identity alone.
 ADMITTED_NAME=""
@@ -58,7 +81,7 @@ cleanup() {
   status=$?
   if [ -n "$ADMITTED_NAME" ] && [ "$TIER0_PAUSE_ON_EXIT" = "1" ]; then
     echo "== cleanup: pausing admitted endpoint $ADMITTED_NAME"
-    if ! timeout --kill-after=10 "$TIER0_PAUSE_COMMAND_SECONDS" \
+    if ! timeout --kill-after="$PAUSE_KILL_GRACE_SECONDS" "$TIER0_PAUSE_COMMAND_SECONDS" \
       python scripts/tier0_admission.py pause --endpoint-name "$ADMITTED_NAME" \
       ${ADMITTED_NAMESPACE:+--namespace "$ADMITTED_NAMESPACE"} \
       --confirm-timeout "$TIER0_PAUSE_CONFIRM_SECONDS" \

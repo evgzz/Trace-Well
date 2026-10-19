@@ -26,6 +26,7 @@ admission rules can be tested with the base development dependencies.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import math
@@ -182,6 +183,100 @@ def pause(
         sleep(min(poll_interval, max(0.0, deadline - clock())))
 
 
+MAX_REPEATS = 10
+CURL_REQUESTS = 3  # G1 anonymous probe, G1 wake-up, G2 direct request
+BUDGET_EXCLUDED = (
+    "G0 setup (dependency install, pytest, public-text scan)",
+    "authenticated admission lookup (no per-call SDK limit)",
+    "local orchestration, request preparation and file operations",
+    "endpoint billing after this process exits, including when cleanup fails",
+)
+
+
+def budget_report(
+    *,
+    commit: str,
+    worktree_dirty: bool,
+    repeats: int,
+    curl_connect_seconds: float,
+    curl_max_seconds: float,
+    pause_confirm_seconds: float,
+    pause_poll_seconds: float,
+    pause_command_seconds: float,
+    pause_kill_grace_seconds: float,
+    judge_timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Sum the individually bounded stages of one supervised run.
+
+    The total is an estimate over bounded stages only, not a guaranteed maximum
+    wall-clock time or cost cap; ``excluded`` lists what it does not cover.
+    ``budget_id`` digests every other field, so an acknowledgment is bound to
+    this exact commit and configuration.
+    """
+    if not (type(repeats) is int and 1 <= repeats <= MAX_REPEATS):
+        raise ValueError(f"repeats must be an integer from 1 to {MAX_REPEATS}")
+    for name, value in (
+        ("curl_connect_seconds", curl_connect_seconds),
+        ("curl_max_seconds", curl_max_seconds),
+        ("pause_confirm_seconds", pause_confirm_seconds),
+        ("pause_poll_seconds", pause_poll_seconds),
+        ("pause_command_seconds", pause_command_seconds),
+        ("pause_kill_grace_seconds", pause_kill_grace_seconds),
+    ):
+        _require_positive_seconds(value, name)
+    if judge_timeout_seconds is None:
+        from tracewell.semantic_judge import DEFAULT_JUDGE_TIMEOUT_SECONDS
+
+        judge_timeout_seconds = DEFAULT_JUDGE_TIMEOUT_SECONDS
+
+    components = {
+        "g1_g2_curl_seconds": CURL_REQUESTS * curl_max_seconds,
+        "g3_g4_judge_seconds": repeats * judge_timeout_seconds,
+        "cleanup_seconds": pause_command_seconds + pause_kill_grace_seconds,
+    }
+    report: dict[str, Any] = {
+        "commit": commit,
+        "worktree_dirty": worktree_dirty,
+        "repeats": repeats,
+        "settings": {
+            "curl_requests": CURL_REQUESTS,
+            "curl_connect_seconds": curl_connect_seconds,
+            "curl_max_seconds": curl_max_seconds,
+            "judge_timeout_seconds": judge_timeout_seconds,
+            "pause_confirm_seconds": pause_confirm_seconds,
+            "pause_poll_seconds": pause_poll_seconds,
+            "pause_command_seconds": pause_command_seconds,
+            "pause_kill_grace_seconds": pause_kill_grace_seconds,
+        },
+        "components": components,
+        "bounded_stages_total_seconds": sum(components.values()),
+        "excluded": list(BUDGET_EXCLUDED),
+        "note": "estimate over bounded stages only; not a guaranteed maximum run time or cost cap",
+    }
+    canonical = json.dumps(report, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    report["budget_id"] = hashlib.sha256(canonical).hexdigest()[:12]
+    return report
+
+
+def format_budget(report: dict[str, Any]) -> str:
+    settings, parts = report["settings"], report["components"]
+    lines = [
+        "Tier-0 run budget (estimate over bounded stages; not a cost cap)",
+        f"  commit              {report['commit']}{' (worktree has uncommitted changes)' if report['worktree_dirty'] else ''}",
+        f"  repeats             {report['repeats']}",
+        f"  G1/G2 curl          {settings['curl_requests']} x {settings['curl_max_seconds']:g}s = {parts['g1_g2_curl_seconds']:g}s"
+        f"  (connect limit {settings['curl_connect_seconds']:g}s each)",
+        f"  G3/G4 judge         {report['repeats']} x {settings['judge_timeout_seconds']:g}s = {parts['g3_g4_judge_seconds']:g}s",
+        f"  cleanup             {settings['pause_command_seconds']:g}s + {settings['pause_kill_grace_seconds']:g}s grace = {parts['cleanup_seconds']:g}s"
+        f"  (polling deadline {settings['pause_confirm_seconds']:g}s, every {settings['pause_poll_seconds']:g}s)",
+        f"  bounded total       {report['bounded_stages_total_seconds']:g}s",
+        "  not included:",
+        *(f"    - {item}" for item in report["excluded"]),
+        f"  budget id           {report['budget_id']}",
+    ]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -195,10 +290,33 @@ def main(argv: list[str] | None = None) -> int:
     pause_parser.add_argument("--namespace")
     pause_parser.add_argument("--confirm-timeout", type=_seconds_arg, default=DEFAULT_PAUSE_CONFIRM_SECONDS)
     pause_parser.add_argument("--poll-interval", type=_seconds_arg, default=DEFAULT_PAUSE_POLL_SECONDS)
+    budget_parser = sub.add_parser("budget")
+    budget_parser.add_argument("--commit", required=True)
+    budget_parser.add_argument("--worktree-dirty", action="store_true")
+    budget_parser.add_argument("--repeats", type=int, required=True)
+    for flag in ("--curl-connect-seconds", "--curl-max-seconds", "--pause-confirm-seconds",
+                 "--pause-poll-seconds", "--pause-command-seconds", "--pause-kill-grace-seconds"):
+        budget_parser.add_argument(flag, type=_seconds_arg, required=True)
+    budget_parser.add_argument("--json-out", type=Path)
     args = parser.parse_args(argv)
 
     try:
-        if args.command == "admit":
+        if args.command == "budget":
+            report = budget_report(
+                commit=args.commit,
+                worktree_dirty=args.worktree_dirty,
+                repeats=args.repeats,
+                curl_connect_seconds=args.curl_connect_seconds,
+                curl_max_seconds=args.curl_max_seconds,
+                pause_confirm_seconds=args.pause_confirm_seconds,
+                pause_poll_seconds=args.pause_poll_seconds,
+                pause_command_seconds=args.pause_command_seconds,
+                pause_kill_grace_seconds=args.pause_kill_grace_seconds,
+            )
+            if args.json_out:
+                args.json_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            print(format_budget(report))
+        elif args.command == "admit":
             result = admit(
                 fetch_metadata(args.endpoint_name, args.namespace or None),
                 configured_url=args.configured_url,
