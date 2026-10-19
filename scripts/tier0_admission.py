@@ -15,7 +15,9 @@ and exits 0. On any failure it prints nothing to stdout and exits 2.
 
   python scripts/tier0_admission.py pause --endpoint-name NAME [--namespace NS]
 
-pauses an endpoint that admission already accepted. Endpoints are never resumed.
+pauses an endpoint that admission already accepted, then polls until its state
+reads exactly ``paused``; it exits 2 if that is not confirmed in time. The pause
+is requested once. Endpoints are never resumed.
 
 huggingface_hub is optional and imported only inside the live lookup, so the
 admission rules can be tested with the base development dependencies.
@@ -29,12 +31,15 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Any
 from urllib import parse
 
 ROOT = Path(__file__).resolve().parents[1]
 
 ADMITTED_STATES = frozenset({"running", "scaledToZero"})
+DEFAULT_PAUSE_CONFIRM_SECONDS = 300.0
+DEFAULT_PAUSE_POLL_SECONDS = 5.0
 _IMMUTABLE_REVISION = re.compile(r"[0-9a-f]{40}")
 
 _spec = importlib.util.spec_from_file_location("hf_endpoint_judge", ROOT / "scripts" / "hf_endpoint_judge.py")
@@ -61,11 +66,15 @@ def _status_text(status: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def fetch_metadata(name: str, namespace: str | None = None) -> dict[str, Any]:
-    """Authenticated control-plane lookup; the only place huggingface_hub is used."""
+def _live_lookup(name: str, namespace: str | None):
     from huggingface_hub import get_inference_endpoint
 
-    endpoint = get_inference_endpoint(name, namespace=namespace)
+    return get_inference_endpoint(name, namespace=namespace)
+
+
+def fetch_metadata(name: str, namespace: str | None = None) -> dict[str, Any]:
+    """Authenticated control-plane lookup through the lazy huggingface_hub import."""
+    endpoint = _live_lookup(name, namespace)
     return {
         "name": endpoint.name,
         "namespace": endpoint.namespace,
@@ -125,13 +134,32 @@ def admit(
     }
 
 
-def pause(name: str, namespace: str | None = None) -> str | None:
-    from huggingface_hub import get_inference_endpoint
+def pause(
+    name: str,
+    namespace: str | None = None,
+    *,
+    confirm_timeout: float = DEFAULT_PAUSE_CONFIRM_SECONDS,
+    poll_interval: float = DEFAULT_PAUSE_POLL_SECONDS,
+    lookup=_live_lookup,
+    sleep=time.sleep,
+    clock=time.monotonic,
+) -> str:
+    """Request one pause, then poll state until it reads exactly ``paused``.
 
-    endpoint = get_inference_endpoint(name, namespace=namespace)
+    The pause mutation is issued once; only the state is re-read. Raises
+    AdmissionError if ``paused`` is not confirmed within ``confirm_timeout``.
+    """
+    endpoint = lookup(name, namespace)
     endpoint.pause()
-    endpoint.fetch()
-    return _status_text(endpoint.status)
+    deadline = clock() + confirm_timeout
+    while True:
+        endpoint.fetch()
+        state = _status_text(endpoint.status)
+        if state == "paused":
+            return state
+        if clock() >= deadline:
+            raise AdmissionError(f"pause not confirmed within {confirm_timeout:g}s; last state {state!r}")
+        sleep(poll_interval)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -145,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
     pause_parser = sub.add_parser("pause")
     pause_parser.add_argument("--endpoint-name", required=True)
     pause_parser.add_argument("--namespace")
+    pause_parser.add_argument("--confirm-timeout", type=float, default=DEFAULT_PAUSE_CONFIRM_SECONDS)
+    pause_parser.add_argument("--poll-interval", type=float, default=DEFAULT_PAUSE_POLL_SECONDS)
     args = parser.parse_args(argv)
 
     try:
@@ -157,7 +187,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             sys.stdout.write(json.dumps(result, sort_keys=True) + "\n")
         else:
-            print("endpoint status after pause:", pause(args.endpoint_name, args.namespace or None))
+            state = pause(
+                args.endpoint_name,
+                args.namespace or None,
+                confirm_timeout=args.confirm_timeout,
+                poll_interval=args.poll_interval,
+            )
+            print("endpoint status after pause:", state)
     except Exception as exc:
         print(f"tier0 {args.command} refused: {exc}", file=sys.stderr)
         return 2

@@ -201,9 +201,12 @@ class _Endpoint:
             raise RuntimeError("simulated pause failure")
         with open(os.environ["FAKE_HF_PAUSE_LOG"], "a") as handle:
             handle.write(json.dumps({"name": self.name, "namespace": self.namespace}) + "\\n")
-        self.status = "paused"
+        self._after_pause = os.environ.get("FAKE_HF_PAUSE_STATES", "paused").split(",")
 
     def fetch(self):
+        states = getattr(self, "_after_pause", None)
+        if states:
+            self.status = states.pop(0) if len(states) > 1 else states[0]
         return self
 
 def get_inference_endpoint(name, namespace=None, token=None):
@@ -290,6 +293,8 @@ def harness(tmp_path):
             TIER0_SKIP_SETUP="1",
             TIER0_REPEATS="1",
             TIER0_OUT_DIR=str(out),
+            TIER0_PAUSE_CONFIRM_SECONDS="0.5",
+            TIER0_PAUSE_POLL_SECONDS="0.05",
             FAKE_HF_METADATA=json.dumps(metadata() if meta is None else meta),
             FAKE_HF_PAUSE_LOG=str(logs["pause"]),
             FAKE_CURL_LOG=str(logs["curl"]),
@@ -386,7 +391,7 @@ def test_shell_failure_after_admission_still_pauses(harness):
 def test_shell_pause_failure_after_clean_run_exits_nonzero(harness):
     result = harness(FAKE_HF_PAUSE_FAIL="1")
     assert result.proc.returncode == 3
-    assert "PAUSE FAILED" in result.proc.stderr
+    assert "PAUSE NOT CONFIRMED" in result.proc.stderr
     assert (result.out / "cleanup_failed.txt").is_file()
     assert (result.out / "run_summary.json").is_file()  # transport evidence kept apart
 
@@ -407,3 +412,101 @@ def test_admission_repository_is_the_runner_model_id():
     assert ADMISSION.expected_repository() == load("tier0_hf_run").MODEL_ID
     shell = (SCRIPTS / "tier0_codespace.sh").read_text(encoding="utf-8")
     assert "MODEL_ID" not in shell and "--expected-repository" not in shell
+
+
+@pytest.mark.parametrize("states", ["running", "pausing", "failed"])
+def test_shell_unconfirmed_pause_after_clean_run_exits_nonzero(harness, states):
+    result = harness(FAKE_HF_PAUSE_STATES=states)
+    assert result.proc.returncode == 3
+    assert "PAUSE NOT CONFIRMED" in result.proc.stderr
+    assert "pause not confirmed" in result.proc.stderr
+    assert (result.out / "cleanup_failed.txt").is_file()
+    assert (result.out / "run_summary.json").is_file()
+    assert len(result.pauses) == 1  # the pause mutation is issued once
+
+
+def test_shell_transitional_state_then_paused_succeeds(harness):
+    result = harness(FAKE_HF_PAUSE_STATES="running,pausing,paused")
+    assert result.proc.returncode == 0, result.proc.stdout + result.proc.stderr
+    assert len(result.pauses) == 1
+    assert not (result.out / "cleanup_failed.txt").exists()
+
+
+def test_shell_unconfirmed_pause_keeps_original_failure_status(harness):
+    result = harness(FAKE_HF_PAUSE_STATES="running", FAKE_CURL_WAKE_STATUS="503")
+    assert result.proc.returncode == 1
+    assert (result.out / "cleanup_failed.txt").is_file()
+
+
+# --- pause confirmation loop -------------------------------------------------
+
+
+class FakeEndpoint:
+    def __init__(self, states, pause_error=None):
+        self.states = list(states)
+        self.status = "running"
+        self.pause_calls = 0
+        self.fetch_calls = 0
+        self.pause_error = pause_error
+
+    def pause(self):
+        self.pause_calls += 1
+        if self.pause_error:
+            raise self.pause_error
+
+    def fetch(self):
+        self.fetch_calls += 1
+        self.status = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+        return self
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def run_pause(endpoint, timeout=30.0, interval=5.0):
+    clock = FakeClock()
+    state = ADMISSION.pause(
+        "tier0-qwen", None, confirm_timeout=timeout, poll_interval=interval,
+        lookup=lambda name, namespace: endpoint, sleep=clock.sleep, clock=clock,
+    )
+    return state, clock
+
+
+def test_pause_confirmed_immediately():
+    endpoint = FakeEndpoint(["paused"])
+    state, clock = run_pause(endpoint)
+    assert state == "paused"
+    assert endpoint.pause_calls == 1 and endpoint.fetch_calls == 1
+    assert clock.now == 0.0
+
+
+def test_pause_confirmed_after_transitional_states_without_reissuing():
+    endpoint = FakeEndpoint(["running", "pausing", "paused"])
+    state, clock = run_pause(endpoint)
+    assert state == "paused"
+    assert endpoint.pause_calls == 1 and endpoint.fetch_calls == 3
+    assert clock.now == 10.0
+
+
+@pytest.mark.parametrize("stuck", ["running", "pausing", "scaledToZero", "failed", None])
+def test_pause_not_confirmed_fails_after_bounded_wait(stuck):
+    endpoint = FakeEndpoint([stuck])
+    with pytest.raises(ADMISSION.AdmissionError, match="not confirmed"):
+        run_pause(endpoint, timeout=30.0, interval=5.0)
+    assert endpoint.pause_calls == 1
+    assert endpoint.fetch_calls == 7  # t = 0, 5, ... 30, then give up
+
+
+def test_pause_request_error_propagates_without_polling():
+    endpoint = FakeEndpoint(["paused"], pause_error=RuntimeError("api down"))
+    with pytest.raises(RuntimeError, match="api down"):
+        run_pause(endpoint)
+    assert endpoint.fetch_calls == 0

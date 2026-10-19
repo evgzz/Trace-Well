@@ -30,8 +30,10 @@ cleanup() {
     echo "== cleanup: pausing admitted endpoint $ADMITTED_NAME"
     if ! python scripts/tier0_admission.py pause --endpoint-name "$ADMITTED_NAME" \
       ${ADMITTED_NAMESPACE:+--namespace "$ADMITTED_NAMESPACE"} \
+      --confirm-timeout "${TIER0_PAUSE_CONFIRM_SECONDS:-300}" \
+      --poll-interval "${TIER0_PAUSE_POLL_SECONDS:-5}" \
       > "$OUT/endpoint_state_after.txt"; then
-      echo "!! PAUSE FAILED: pause it manually in the dashboard NOW" >&2
+      echo "!! PAUSE NOT CONFIRMED: pause it manually in the dashboard NOW" >&2
       # Kept apart from inference results; a clean run must not report success.
       echo "$(date -u +%FT%TZ) pause failed for $ADMITTED_NAME" > "$OUT/cleanup_failed.txt"
       [ "$status" -ne 0 ] || status=3
