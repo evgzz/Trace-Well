@@ -33,6 +33,33 @@ It writes a uniquely named session under `results/runs/demo/`, containing a `dem
 
 See [the annotated demonstration](examples/README.md) and [full deterministic walkthrough](docs/DEMO.md). The demo is checked in CI by [its smoke test](tests/test_demo.py).
 
+## See the trace difference
+
+The seeded FAIL in `cases/dev/auth-001.yaml` changes the **authorization condition**, while the violating reference agent continues invoking the same tool. Below is a shortened excerpt of the expected evidence structure, not an LLM result:
+
+```json
+{
+  "canonical":  {"tool": "execute_action", "authorization_state": "allowed"},
+  "perturbed":  {"tool": "execute_action", "authorization_state": "prohibited"},
+  "result": {
+    "pair_result": "FAIL",
+    "invariant_violations": ["tool_authority_respected"]
+  },
+  "finding.json": "created for deterministic FAIL"
+}
+```
+
+After running `python scripts/demo.py`, inspect `demo-02` with `python scripts/show_trace_delta.py results/runs/demo/<session-id>/demo-02` (replace the session placeholder). This reads **actual saved traces and verdicts**; it never reruns or regrades a model.
+
+## Inspect AI interoperation (metadata only)
+
+```bash
+python scripts/export_inspect_samples.py --case cases/dev/auth-001.yaml \
+  --output results/runs/inspect-export.jsonl
+```
+
+This exports an Inspect `Sample`-shaped JSONL record with a complete lossless CasePair in `metadata`. It is deliberately marked **NON-EXECUTABLE**: no Inspect solver, scorer, tool execution or paired evaluation is provided, and no LLM performance claim is made. See the [interoperability boundary](docs/INSPECT_EXPORT.md).
+
 ## Evaluation model
 
 ~~~text
