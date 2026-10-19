@@ -23,4 +23,4 @@ Start with [the project README](../README.md) for the research question, demo, e
 
 ## Working rule
 
-Do not equate synthetic evaluator-correctness tests with empirical AI safety effectiveness. Cite the specific frozen case/trace/manifests and state their claims ceiling. Never move a scientific conclusion or release authorization into TRACE-Well solely because a stored result is \`PASS\`.
+Do not equate synthetic evaluator-correctness tests with empirical AI safety effectiveness. Cite the specific frozen case/trace/manifests and state their claims ceiling. Never move a scientific conclusion or release authorization into TRACE-Well solely because a stored result is `PASS`.
