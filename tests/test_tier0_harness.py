@@ -1,0 +1,342 @@
+"""Tier-0 hosted harness: admission, protected request paths, payload contract.
+
+No network, billing, endpoint credentials, live model or huggingface_hub required.
+A fake huggingface_hub package and a recording fake curl stand in for the
+control plane and the inference host.
+"""
+
+from __future__ import annotations
+
+from importlib import util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+from tracewell.semantic_judge import JudgeRequest
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+GOLDEN = Path(__file__).parent / "fixtures" / "hf_endpoint_default_payload.json"
+MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+REVISION = "7ae557604adf67be50417f59c2c2f167def9a775"
+HOST = "abc123.endpoints.huggingface.cloud"
+
+
+def load(name: str):
+    spec = util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def metadata(**overrides):
+    value = {
+        "name": "tier0-qwen",
+        "namespace": "example-org",
+        "status": "running",
+        "url": f"https://{HOST}",
+        "repository": MODEL,
+        "revision": REVISION,
+    }
+    value.update(overrides)
+    return value
+
+
+ADMISSION = load("tier0_admission")
+
+
+def admit(meta, configured_url=f"https://{HOST}", revision=REVISION, repository=MODEL):
+    return ADMISSION.admit(
+        meta, configured_url=configured_url, expected_repository=repository, expected_revision=revision
+    )
+
+
+# --- admission rules ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("state", ["running", "scaledToZero"])
+def test_admitted_states_return_control_plane_host(state):
+    result = admit(metadata(status=state))
+    assert result["expected_host"] == HOST
+    assert result["origin"] == f"https://{HOST}"
+    assert result["endpoint_name"] == "tier0-qwen"
+
+
+@pytest.mark.parametrize("state", [
+    "paused", "pending", "initializing", "failed", "updateFailed", "Running",
+    "notrunning", "running ", "scaledToZeroPending", "", None, 1,
+])
+def test_disallowed_or_unknown_states_are_rejected(state):
+    module = load("tier0_admission")
+    with pytest.raises(module.AdmissionError):
+        module.admit(metadata(status=state), configured_url=f"https://{HOST}",
+                     expected_repository=MODEL, expected_revision=REVISION)
+
+
+@pytest.mark.parametrize("key", ["name", "status", "url", "repository", "revision"])
+@pytest.mark.parametrize("missing", [None, ""])
+def test_missing_metadata_is_rejected(key, missing):
+    module = load("tier0_admission")
+    with pytest.raises(module.AdmissionError, match="missing"):
+        module.admit(metadata(**{key: missing}), configured_url=f"https://{HOST}",
+                     expected_repository=MODEL, expected_revision=REVISION)
+
+
+@pytest.mark.parametrize("meta, kwargs, message", [
+    (metadata(repository="Qwen/Qwen2.5-7B-Instruct"), {}, "repository"),
+    (metadata(revision="0" * 40), {}, "revision"),
+    (metadata(), {"revision": "main"}, "40-character"),
+    (metadata(), {"revision": REVISION.upper()}, "40-character"),
+    (metadata(), {"configured_url": "https://evil.example.com"}, "does not match"),
+    (metadata(), {"configured_url": f"https://{HOST}.evil.example"}, "does not match"),
+    (metadata(), {"configured_url": f"https://{HOST}/v1/chat/completions"}, "origin"),
+    (metadata(url=f"http://{HOST}"), {}, "HTTPS"),
+    (metadata(url=f"https://{HOST}/other"), {}, "origin"),
+])
+def test_identity_and_destination_mismatches_are_rejected(meta, kwargs, message):
+    with pytest.raises(ADMISSION.AdmissionError, match=message):
+        admit(meta, **kwargs)
+
+
+def test_admission_module_imports_without_huggingface_hub(monkeypatch):
+    monkeypatch.setitem(sys.modules, "huggingface_hub", None)
+    module = load("tier0_admission")
+    with pytest.raises(ImportError):
+        module.fetch_metadata("tier0-qwen")
+
+
+# --- runner forwarding and payload contract ---------------------------------
+
+
+def test_runner_forwards_expected_host_to_adapter(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT_URL", f"https://{HOST}")
+    monkeypatch.setenv("HF_EXPECTED_HOST", HOST)
+    monkeypatch.setenv("HF_API_MODEL", MODEL)
+    monkeypatch.setenv("HF_REVISION", REVISION)
+    monkeypatch.setenv("HF_ENGINE", "vllm")
+    command = load("tier0_hf_run").judge_command()
+    assert command[command.index("--expected-host") + 1] == HOST
+    assert command[command.index("--base-url") + 1] == f"https://{HOST}"
+
+
+def test_runner_refuses_to_build_command_without_expected_host(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT_URL", f"https://{HOST}")
+    monkeypatch.delenv("HF_EXPECTED_HOST", raising=False)
+    with pytest.raises(SystemExit, match="HF_EXPECTED_HOST"):
+        load("tier0_hf_run").judge_command()
+
+
+def payload_args(**overrides):
+    from types import SimpleNamespace
+
+    values = dict(api_model=MODEL, temperature=0.0, max_tokens=256, seed=None, response_schema=False)
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def fixed_request() -> JudgeRequest:
+    return JudgeRequest(
+        request_id="golden-r1",
+        case_id="golden-case",
+        trace_id="golden-trace",
+        construct="response_supported_by_observable_evidence",
+        rubric="Assess whether the response is supported by the observable evidence.",
+        observable_evidence=[{"event_id": "e1", "output": "synthetic observable output"}],
+    )
+
+
+def test_default_payload_bytes_match_committed_golden_fixture():
+    """Update the fixture only for an intended, explained request-contract change."""
+    adapter = load("hf_endpoint_judge")
+    encoded = adapter._encode(adapter._model_payload(fixed_request(), payload_args()))
+    assert encoded == GOLDEN.read_bytes()
+
+
+def test_response_schema_changes_only_response_format():
+    adapter = load("hf_endpoint_judge")
+    base = json.loads(adapter._encode(adapter._model_payload(fixed_request(), payload_args())))
+    schema = json.loads(adapter._encode(adapter._model_payload(fixed_request(), payload_args(response_schema=True))))
+    assert schema.pop("response_format")["json_schema"]["schema"] == adapter.JUDGE_RESPONSE_SCHEMA
+    assert schema == base
+
+
+def test_adapter_accepts_schema_and_expected_host_together():
+    adapter = load("hf_endpoint_judge")
+    args = adapter.parser().parse_args([
+        "--base-url", f"https://{HOST}", "--expected-host", HOST, "--response-schema",
+        "--api-model", MODEL, "--model", MODEL, "--model-revision", REVISION,
+        "--inference-engine", "vllm", "--decoding-determinism-class", "unknown",
+        "--rubric-version", "semantic-rubric-v1",
+    ])
+    assert args.response_schema is True
+    assert adapter._chat_url(args.base_url, allow_http=False, expected_host=args.expected_host) == (
+        f"https://{HOST}/v1/chat/completions"
+    )
+
+
+# --- shell orchestration: all protected paths -------------------------------
+
+FAKE_HUB = '''
+import json, os
+
+class _Endpoint:
+    def __init__(self, name, namespace):
+        meta = json.loads(os.environ["FAKE_HF_METADATA"])
+        self.name = meta.get("name")
+        self.namespace = meta.get("namespace")
+        self.status = meta.get("status")
+        self.url = meta.get("url")
+        self.repository = meta.get("repository")
+        self.revision = meta.get("revision")
+
+    def pause(self):
+        with open(os.environ["FAKE_HF_PAUSE_LOG"], "a") as handle:
+            handle.write(json.dumps({"name": self.name, "namespace": self.namespace}) + "\\n")
+        self.status = "paused"
+
+    def fetch(self):
+        return self
+
+def get_inference_endpoint(name, namespace=None, token=None):
+    return _Endpoint(name, namespace)
+'''
+
+FAKE_CURL = '''#!/usr/bin/env python3
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_CURL_LOG"], "a") as handle:
+    handle.write(json.dumps(argv) + "\\n")
+out = argv[argv.index("-o") + 1] if "-o" in argv else None
+url = next(a for a in argv if a.startswith("http"))
+authed = any(a.startswith("Authorization:") for a in argv)
+if not authed:
+    status, body = "401", "{}"
+elif url.endswith("/v1/models"):
+    status = os.environ.get("FAKE_CURL_WAKE_STATUS", "200")
+    body = json.dumps({"data": [{"id": os.environ["HF_API_MODEL"]}]})
+else:
+    status = "200"
+    body = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]})
+if out and out != "/dev/null":
+    open(out, "w").write(body)
+sys.stdout.write(status)
+'''
+
+
+@pytest.fixture
+def harness(tmp_path):
+    if shutil.which("bash") is None:
+        pytest.skip("bash unavailable")
+    fake_lib = tmp_path / "fake_lib" / "huggingface_hub"
+    fake_lib.mkdir(parents=True)
+    (fake_lib / "__init__.py").write_text(FAKE_HUB, encoding="utf-8")
+    fake_bin = tmp_path / "fake_bin"
+    fake_bin.mkdir()
+    curl = fake_bin / "curl"
+    curl.write_text(FAKE_CURL, encoding="utf-8")
+    curl.chmod(0o755)
+    out = tmp_path / "out"
+
+    def run(meta=None, **env_overrides):
+        env = {
+            key: value for key, value in os.environ.items()
+            if not key.startswith(("HF_", "TIER0_", "FAKE_"))
+        }
+        env.update(
+            PATH=f"{fake_bin}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+            PYTHONPATH=f"{tmp_path / 'fake_lib'}{os.pathsep}{ROOT}",
+            HF_TOKEN="fake-test-secret",
+            HF_ENDPOINT_URL=f"https://{HOST}/v1/",
+            HF_ENDPOINT_NAME="tier0-qwen",
+            HF_REVISION=REVISION,
+            TIER0_SKIP_SETUP="1",
+            TIER0_REPEATS="0",
+            TIER0_OUT_DIR=str(out),
+            FAKE_HF_METADATA=json.dumps(metadata() if meta is None else meta),
+            FAKE_HF_PAUSE_LOG=str(tmp_path / "pause.log"),
+            FAKE_CURL_LOG=str(tmp_path / "curl.log"),
+        )
+        env.update(env_overrides)
+        proc = subprocess.run(
+            ["bash", str(SCRIPTS / "tier0_codespace.sh")],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=120,
+        )
+        curl_log = tmp_path / "curl.log"
+        pause_log = tmp_path / "pause.log"
+        calls = [json.loads(line) for line in curl_log.read_text().splitlines()] if curl_log.exists() else []
+        pauses = pause_log.read_text().splitlines() if pause_log.exists() else []
+        return proc, calls, pauses, out
+
+    return run
+
+
+def protected_paths_untouched(calls, out: Path):
+    token_calls = [c for c in calls if any(a.startswith("Authorization:") for a in c)]
+    assert token_calls == []  # G1 wake-up and G2 direct request never ran
+    assert not (out / "raw_request.json").exists()  # runner prep never ran
+    assert not (out / "run_summary.json").exists()  # G3/G4 adapter runs never ran
+
+
+@pytest.mark.parametrize("meta, env, message", [
+    (metadata(status="paused"), {}, "not admitted"),
+    (metadata(status="failed"), {}, "not admitted"),
+    (metadata(status=None), {}, "missing status"),
+    (metadata(url=None), {}, "missing url"),
+    (metadata(repository="other/model"), {}, "repository"),
+    (metadata(revision="1" * 40), {}, "revision"),
+    (metadata(), {"HF_ENDPOINT_URL": "https://evil.example.com"}, "does not match"),
+])
+def test_shell_admission_failure_blocks_all_protected_paths(harness, meta, env, message):
+    proc, calls, pauses, out = harness(meta, **env)
+    assert proc.returncode != 0
+    assert message in proc.stderr
+    assert "no token was sent" in proc.stderr
+    assert calls == []
+    protected_paths_untouched(calls, out)
+    assert pauses == []  # an unadmitted endpoint is never paused
+
+
+def test_shell_requires_explicit_revision(harness):
+    proc, calls, pauses, out = harness(HF_REVISION="")
+    assert proc.returncode != 0
+    assert "HF_REVISION" in proc.stderr
+    assert calls == [] and pauses == []
+    protected_paths_untouched(calls, out)
+
+
+@pytest.mark.parametrize("state", ["running", "scaledToZero"])
+def test_shell_admitted_run_uses_hardened_curl_on_admitted_origin(harness, state):
+    proc, calls, pauses, out = harness(metadata(status=state))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert len(calls) == 3  # anonymous probe, G1 wake-up, G2 direct request
+    for argv in calls:
+        assert argv[:2] == ["-q", "--proto"] and argv[2] == "=https"
+        assert "--max-redirs" in argv and argv[argv.index("--max-redirs") + 1] == "0"
+        assert "-L" not in argv and "--location" not in argv
+        url = next(a for a in argv if a.startswith("http"))
+        assert url.startswith(f"https://{HOST}/v1/")
+    assert [any(a.startswith("Authorization:") for a in c) for c in calls] == [False, True, True]
+    assert all("--fail-with-body" in c for c in calls[1:])
+    assert json.loads((out / "admission.json").read_text())["expected_host"] == HOST
+    assert len(pauses) == 1 and json.loads(pauses[0])["name"] == "tier0-qwen"
+
+
+def test_shell_failure_after_admission_still_pauses(harness):
+    proc, calls, pauses, out = harness(FAKE_CURL_WAKE_STATUS="503")
+    assert proc.returncode != 0
+    assert "Endpoint not ready (HTTP 503)" in proc.stdout
+    assert len(calls) == 2  # stopped before G2
+    assert not (out / "run_summary.json").exists()
+    assert len(pauses) == 1
+
+
+def test_shell_pause_can_be_disabled_after_admission(harness):
+    proc, _, pauses, _ = harness(TIER0_PAUSE_ON_EXIT="0")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert pauses == []

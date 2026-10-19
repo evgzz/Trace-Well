@@ -6,8 +6,10 @@ Uses the existing semantic pipeline and HF endpoint adapter; adds no verdict log
   python scripts/tier0_hf_run.py prep   # write adapter_request.json and raw_request.json
   python scripts/tier0_hf_run.py run    # execute the fixture N times and summarize
 
-Environment: HF_TOKEN, HF_ENDPOINT_URL, HF_API_MODEL, HF_REVISION, HF_ENGINE,
-optional HF_ENGINE_VERSION, RUN_ID.
+Environment: HF_TOKEN, HF_ENDPOINT_URL, HF_EXPECTED_HOST, HF_API_MODEL, HF_REVISION,
+HF_ENGINE, optional HF_ENGINE_VERSION, RUN_ID. HF_ENDPOINT_URL and HF_EXPECTED_HOST
+must come from scripts/tier0_admission.py; the adapter re-checks them before sending
+the token.
 """
 
 from __future__ import annotations
@@ -67,6 +69,7 @@ def judge_command() -> list[str]:
     command = [
         sys.executable, str(ROOT / "scripts" / "tier0_capture_judge.py"),
         "--base-url", need("HF_ENDPOINT_URL"),
+        "--expected-host", need("HF_EXPECTED_HOST"),
         "--api-model", need("HF_API_MODEL"),
         "--model", MODEL_ID,
         "--model-revision", need("HF_REVISION"),

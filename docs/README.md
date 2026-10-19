@@ -25,6 +25,7 @@ Start with [the project README](../README.md) for the research question, demo, e
 - [V1.5 scope](MVP_SCOPE.md), [PRD](PRD.md), and [proof-obligation/ADR map](PO_ADR_MAP.md) specify the frozen deterministic mechanism.
 - [Reproduction runbook](REPRODUCTION_RUNBOOK.md) gives the independent-human protocol; the automated CI runner is insufficient for that signoff.
 - [V1.6 scope](V1.6_SCOPE.md), [evaluation plan](V1.6_EVALUATION_PLAN.md), and [real-model runbook](V1.6_REAL_MODEL_RUNBOOK.md) separate implementation from prospective empirical study.
+- [V1.6 Tier-0 hosted harness](V1.6_TIER0_HOSTED_HARNESS.md) documents the experimental hosted-endpoint scripts and their admission policy; it produces `transport_only` evidence only.
 - [ADR registry](adr/README.md) records accepted and proposed decisions; ADR-0015 does **not** authorize semantic-only FAIL.
 - [Engineering context](ENGINEERING_CONTEXT.md) records branch/PR handoffs and must be verified against live repository state.
 - [Relation to evaluation practice](RELATION_TO_PRACTICE.md), [roadmap](ROADMAP.md) and [change log](../CHANGELOG.md) provide background, not additional safety claims.
