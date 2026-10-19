@@ -1,5 +1,15 @@
 # TRACE-Well V1.5 — Deterministic Demo
 
+## Fast path: automated offline evidence demonstration
+
+From the repository root after installing the development package:
+
+```bash
+python scripts/demo.py
+```
+
+This invokes the existing CLI for seeded `PASS`, `FAIL`, and `REVIEW` cases, verifies the expected `SafetyFinding` presence/absence and required trace/manifest/result files, and writes a session-scoped `demo_summary.json` under `results/runs/demo/`. The script exits nonzero if observed evidence disagrees with expectations. No live LLM is involved. See [the annotated example](../examples/README.md).
+
 This demo exercises the implemented V1.5 mechanism using the committed synthetic benchmark.
 
 It does not demonstrate clinical validity, population performance, comprehensive safety, or production readiness.
