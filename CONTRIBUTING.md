@@ -1,19 +1,20 @@
 # Contributing to TRACE-Well
 
-TRACE-Well V1.5 is intentionally small. Contributions should preserve the deterministic paired-evaluation primitive rather than broaden scope by default.
+TRACE-Well preserves a frozen deterministic V1.5 reference and an integrated-but-empirically-unvalidated V1.6 semantic-judge development path. Contributions should preserve evidence boundaries and keep new experiments distinguishable from established results.
 
 ## Before changing code
 
 Read:
 
 1. `AGENTS.md`
-2. `docs/MVP_SCOPE.md`
-3. `docs/PRD.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/EVALUATION_SPEC.md`
-6. `docs/BENCHMARK_DESIGN.md`
-7. `docs/REPRODUCIBILITY.md`
-8. `docs/LIMITATIONS.md`
+2. `docs/README.md`
+3. `docs/MVP_SCOPE.md`
+4. `docs/PRD.md`
+5. `docs/ARCHITECTURE.md`
+6. `docs/EVALUATION_SPEC.md`
+7. `docs/BENCHMARK_DESIGN.md`
+8. `docs/REPRODUCIBILITY.md`
+9. `docs/LIMITATIONS.md`
 
 If a proposed change alters a load-bearing decision, add a new Proposed ADR. Do not rewrite the Decision section of an Accepted ADR.
 
@@ -32,7 +33,10 @@ Before submitting a change:
 ```bash
 pytest
 python scripts/check_public_text.py
+python scripts/demo.py
 ```
+
+The offline demo must verify PASS/FAIL/REVIEW evidence and does not establish model-level validity.
 
 Both must pass without model credentials or network inference.
 
@@ -49,7 +53,7 @@ Prefer:
 
 ## Benchmark contributions
 
-A new CasePair should enter V1.5 only when it contributes to a defined proof obligation or required control.
+The frozen V1.5 CasePair inventory must not be silently changed. Add new studies under a separately declared experimental scope rather than altering the frozen V1.5 corpus.
 
 Do not inflate benchmark size by treating reference-agent modes as new CasePairs. Pair identity and run configuration are separate.
 
