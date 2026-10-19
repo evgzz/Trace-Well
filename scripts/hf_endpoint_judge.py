@@ -16,6 +16,7 @@ import hashlib
 import json
 from pathlib import Path
 import os
+import re
 import sys
 from typing import Any
 from urllib import error, parse, request
@@ -80,6 +81,10 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--rubric-version", required=True)
     value.add_argument("--token-env", default="HF_TOKEN")
     value.add_argument(
+        "--expected-host",
+        help="Expected exact hostname verified from dedicated endpoint control-plane metadata; required for HTTPS.",
+    )
+    value.add_argument(
         "--allow-http-endpoint",
         action="store_true",
         help="Testing only: allow an http endpoint. Real hosted endpoints must use https.",
@@ -87,17 +92,49 @@ def parser() -> argparse.ArgumentParser:
     return value
 
 
-def _chat_url(base_url: str, *, allow_http: bool) -> str:
-    parsed = parse.urlparse(base_url)
+def _chat_url(
+    base_url: str, *, allow_http: bool, expected_host: str | None = None
+) -> str:
+    """Check the initial bearer-token destination before any network request.
+
+    expected_host must originate independently from authenticated endpoint
+    metadata; deriving it from base_url would defeat the trust boundary.
+    """
+    if any(ord(char) < 33 or ord(char) == 127 for char in base_url):
+        raise ValueError("endpoint URL must not contain whitespace or control characters")
+    parsed = parse.urlsplit(base_url)
     if parsed.scheme != "https" and not (allow_http and parsed.scheme == "http"):
         raise ValueError("Hugging Face dedicated endpoint must use https")
     if not parsed.hostname:
         raise ValueError("base URL must include a hostname")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("endpoint URL must not contain userinfo")
+    if parsed.query or parsed.fragment or parsed.path not in ("", "/", "/v1", "/v1/"):
+        raise ValueError("endpoint URL must contain only its origin or optional /v1")
 
-    trimmed = base_url.rstrip("/")
-    if trimmed.endswith("/v1"):
-        return f"{trimmed}/chat/completions"
-    return f"{trimmed}/v1/chat/completions"
+    if parsed.scheme == "https":
+        if not expected_host:
+            raise ValueError("--expected-host is required for HTTPS endpoints")
+        if (
+            len(expected_host) > 253
+            or re.fullmatch(r"[A-Za-z0-9.-]+", expected_host, flags=re.ASCII) is None
+            or any(
+                not label or len(label) > 63
+                or label.startswith("-") or label.endswith("-")
+                for label in expected_host.split(".")
+            )
+        ):
+            raise ValueError("expected host must be one exact DNS hostname")
+        if parsed.port not in (None, 443):
+            raise ValueError("hosted endpoint must use the default HTTPS port")
+        if parsed.hostname.lower() != expected_host.lower():
+            raise ValueError("endpoint hostname does not match --expected-host")
+    else:
+        # Only the existing loopback fake-server path may use cleartext HTTP.
+        if parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError("HTTP test endpoint must be loopback-only")
+
+    return f"{parsed.scheme}://{parsed.netloc}/v1/chat/completions"
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -248,7 +285,11 @@ def main() -> int:
         rendered_prompt_digest = _sha256_file(args.rendered_prompt_file)
         encoded = _encode(_model_payload(judge_request, args))
         raw_response = _post(
-            _chat_url(args.base_url, allow_http=args.allow_http_endpoint),
+            _chat_url(
+                args.base_url,
+                allow_http=args.allow_http_endpoint,
+                expected_host=args.expected_host,
+            ),
             encoded,
             token=token,
             timeout_seconds=args.http_timeout_seconds,
