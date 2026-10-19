@@ -12,6 +12,10 @@ Start with [the project README](../README.md) for the research question, demo, e
 | What do results **not** establish? | [Limitations](LIMITATIONS.md) |
 | What is completed versus pending? | [V1.5 acceptance](ACCEPTANCE.md), [V1.6 acceptance](V1.6_ACCEPTANCE.md) |
 
+## Research responsibility
+
+- [Research boundaries](RESEARCH_BOUNDARIES.md) distinguish evaluator findings from scientific intervention conclusions and independent release authorization.
+
 ## Methods, engineering and decisions
 
 - [V1.5 scope](MVP_SCOPE.md), [PRD](PRD.md), and [proof-obligation/ADR map](PO_ADR_MAP.md) specify the frozen deterministic mechanism.
