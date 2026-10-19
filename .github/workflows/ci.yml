@@ -27,6 +27,9 @@ jobs:
       - name: Run tests
         run: pytest
 
+      - name: Run offline synthetic demo
+        run: python scripts/demo.py
+
       - name: Scan public text
         run: python scripts/check_public_text.py
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -370,7 +371,12 @@ def test_every_mock_failure_carries_reason_and_correct_rejected_response(
 def test_failure_details_are_structured_evidence_not_exception_text(tmp_path: Path):
     with pytest.raises(SemanticJudgeError) as nonzero:
         run_semantic_judge(command(), request("nonzero"))
-    assert nonzero.value.details == {"returncode": 7}
+    stderr = b"mock semantic judge failure\n"
+    assert nonzero.value.details == {
+        "returncode": 7,
+        "stderr_bytes": len(stderr),
+        "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+    }
 
     with pytest.raises(SemanticJudgeError) as mismatch:
         run_semantic_judge(command(), request("request_id_mismatch"))
@@ -715,3 +721,20 @@ def test_seed_is_never_coerced_on_the_returned_side(tmp_path: Path, raw_seed):
         run_semantic_judge(judge, request(), expected_configuration=config(seed=1))
     # A non-integer seed is a schema failure, never a coerced MATCH.
     assert excinfo.value.reason is JudgeErrorReason.JUDGE_SCHEMA_INVALID
+
+
+def test_deeply_nested_output_fails_closed_as_malformed_json():
+    with pytest.raises(SemanticJudgeProtocolError) as excinfo:
+        run_semantic_judge(command(), request("deep_nesting"))
+    assert excinfo.value.reason is JudgeErrorReason.JUDGE_MALFORMED_JSON
+
+
+def test_stderr_content_never_reaches_error_message_or_details():
+    secret = "sk-FAKE-SECRET-TOKEN-1234"
+    with pytest.raises(SemanticJudgeProtocolError) as excinfo:
+        run_semantic_judge(command(), request("secret_stderr"))
+    error = excinfo.value
+    assert error.reason is JudgeErrorReason.JUDGE_NONZERO_EXIT
+    assert error.details["returncode"] == 3
+    assert secret not in str(error)
+    assert secret not in json.dumps(error.details)

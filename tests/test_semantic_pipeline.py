@@ -631,3 +631,24 @@ def test_configuration_reason_cannot_hide_identity_mismatch(tmp_path: Path):
         SemanticEvaluationEvidence.model_validate(
             {**payload, "judge_configuration_check": "MATCH"}
         )
+
+
+@pytest.mark.parametrize(
+    ("mock_mode", "reason"),
+    [
+        ("deep_nesting", "JUDGE_MALFORMED_JSON"),
+        ("secret_stderr", "JUDGE_NONZERO_EXIT"),
+    ],
+)
+def test_hostile_judge_output_resolves_to_review_without_leaking(
+    tmp_path: Path, mock_mode: str, reason: str
+):
+    evidence, run_dir = _run(
+        tmp_path,
+        f"hostile-{mock_mode}",
+        fixture=_fixture_with_mock_mode(tmp_path, mock_mode),
+    )
+    assert evidence.integrated_verdict == Verdict.REVIEW
+    assert evidence.judge_error_reason.value == reason
+    persisted = (run_dir / "semantic_result.json").read_text(encoding="utf-8")
+    assert "sk-FAKE-SECRET-TOKEN-1234" not in persisted

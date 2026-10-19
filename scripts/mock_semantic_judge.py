@@ -16,6 +16,12 @@ def main() -> int:
     if mode == "nonzero":
         print("mock semantic judge failure", file=sys.stderr)
         return 7
+    if mode == "secret_stderr":
+        print("auth failed with token sk-FAKE-SECRET-TOKEN-1234", file=sys.stderr)
+        return 3
+    if mode == "deep_nesting":
+        sys.stdout.write("[" * 100000 + "\n")
+        return 0
     if mode == "malformed_json":
         sys.stdout.write("{not-json}\n")
         return 0

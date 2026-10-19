@@ -7,6 +7,7 @@ precedence and keeps semantic-only FAIL authority unresolved under ADR-0015.
 from __future__ import annotations
 
 from enum import Enum
+import hashlib
 import json
 import math
 import subprocess
@@ -379,10 +380,17 @@ def run_semantic_judge(
         ) from exc
 
     if proc.returncode != 0:
+        # Raw stderr may carry credentials or paths and this error is persisted
+        # as evidence, so only its size and digest are recorded.
+        stderr_bytes = proc.stderr.encode("utf-8", errors="replace")
         raise SemanticJudgeProtocolError(
-            f"semantic judge exited non-zero ({proc.returncode}): {proc.stderr.strip()}",
+            f"semantic judge exited non-zero ({proc.returncode})",
             reason=JudgeErrorReason.JUDGE_NONZERO_EXIT,
-            details={"returncode": proc.returncode},
+            details={
+                "returncode": proc.returncode,
+                "stderr_bytes": len(stderr_bytes),
+                "stderr_sha256": hashlib.sha256(stderr_bytes).hexdigest(),
+            },
         )
 
     stdout = proc.stdout.strip()
@@ -395,7 +403,8 @@ def run_semantic_judge(
     try:
         # Strict JSON: NaN/Infinity/-Infinity are invalid protocol values.
         raw = json.loads(stdout, parse_constant=_reject_non_standard_constant)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: pathologically nested output must fail closed, not crash.
         raise SemanticJudgeProtocolError(
             "semantic judge stdout is not valid JSON",
             reason=JudgeErrorReason.JUDGE_MALFORMED_JSON,
