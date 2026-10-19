@@ -1,10 +1,10 @@
 # AGENTS.md
 
-> Repository-level instructions for coding agents and contributors working on the `semantic-judge-v1.6` branch.
+> Repository-level instructions for coding agents and contributors across TRACE-Well branches. Consult [the documentation index](docs/README.md) and branch-specific acceptance protocols before editing.
 
 ## Mission
 
-Extend TRACE-Well with an isolated semantic-judge capability **without changing the frozen V1.5 deterministic mechanism or its claims**.
+Maintain TRACE-Well's deterministic V1.5 mechanism and integrated V1.6 semantic-judge development capability **without expanding frozen V1.5 evidence or claims**.
 
 Priority order:
 
@@ -26,7 +26,7 @@ The V1.5 evidence anchor is commit:
 
 ## V1.6 product boundary
 
-V1.6 milestone 1 adds only the semantic-judge execution protocol and conservative integration seam described in `docs/V1.6_SCOPE.md` and ADR-0017.
+V1.6 semantic-judge engineering is integrated on `main` at `1.6.0.dev0` as recorded in `docs/V1.6_ACCEPTANCE.md`. The capability includes isolated execution, fake-server-tested provider adapters, a calibration harness, and a conservative integration seam. Implementation completion is not empirical model validation.
 
 It is not yet:
 
@@ -38,7 +38,7 @@ It is not yet:
 - a statistical reliability study;
 - a multi-judge ensemble system.
 
-Real-model integrations, human calibration, disagreement analysis, semantic-only FAIL authority, and statistical claims remain later milestones unless explicitly admitted through scope/ADR changes.
+Real-model execution, independent human-label calibration, empirical disagreement analysis, semantic-only FAIL authority, and statistical claims remain unestablished unless supported by separate evidence and the relevant acceptance/ADR gates.
 
 ## V1.5 freeze rule
 
@@ -73,7 +73,7 @@ When making a load-bearing V1.6 choice not covered by an existing ADR, create a 
 
 ADR-0015 remains **Proposed**. Do not grant semantic-only judgment final FAIL authority until that decision is explicitly resolved with appropriate calibration evidence.
 
-ADR-0017 remains the controlling Proposed architecture for semantic-judge isolation during milestone 1.
+ADR-0017 remains the controlling Proposed architecture for semantic-judge isolation, subject to the canonical V1.6 acceptance record.
 
 Never rewrite the Decision section of an Accepted ADR. Supersede accepted history with a new ADR.
 
@@ -125,7 +125,10 @@ Before considering a change complete, run:
 ```bash
 pytest
 python scripts/check_public_text.py
+python scripts/demo.py
 ```
+
+The demo must produce the expected synthetic PASS, FAIL, and REVIEW outcomes with inspectable evidence. It is not a real-model calibration test.
 
 Tests for semantic-judge milestone 1 must include:
 
