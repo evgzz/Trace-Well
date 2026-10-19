@@ -12,6 +12,10 @@ Start with [the project README](../README.md) for the research question, demo, e
 | What do results **not** establish? | [Limitations](LIMITATIONS.md) |
 | What is completed versus pending? | [V1.5 acceptance](ACCEPTANCE.md), [V1.6 acceptance](V1.6_ACCEPTANCE.md) |
 
+## Interoperability
+
+- [Inspect AI metadata-only export](INSPECT_EXPORT.md) explains the Sample-shape record and why it is not an executable Task or scorer.
+
 ## Research responsibility
 
 - [Research boundaries](RESEARCH_BOUNDARIES.md) distinguish evaluator findings from scientific intervention conclusions and independent release authorization.
