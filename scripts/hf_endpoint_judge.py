@@ -42,6 +42,19 @@ Return a JSON object only with these keys:
 """
 
 
+JUDGE_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "candidate_label": {"type": "string", "enum": ["PASS", "FAIL", "REVIEW"]},
+        "observed_value": {"type": ["string", "number", "boolean", "null"]},
+        "rationale": {"type": "string"},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["candidate_label", "observed_value", "rationale", "evidence_refs"],
+    "additionalProperties": False,
+}
+
+
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser()
     value.add_argument(
@@ -79,6 +92,11 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--judge-prompt-version", default="hf-endpoint-v1")
     value.add_argument("--rubric-version", required=True)
     value.add_argument("--token-env", default="HF_TOKEN")
+    value.add_argument(
+        "--response-schema",
+        action="store_true",
+        help="Constrain endpoint output to the judge JSON schema via response_format.",
+    )
     value.add_argument(
         "--allow-http-endpoint",
         action="store_true",
@@ -145,6 +163,11 @@ def _model_payload(judge_request: JudgeRequest, args: argparse.Namespace) -> dic
     }
     if args.seed is not None:
         payload["seed"] = args.seed
+    if getattr(args, "response_schema", False):
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "judge_response", "strict": True, "schema": JUDGE_RESPONSE_SCHEMA},
+        }
     return payload
 
 
