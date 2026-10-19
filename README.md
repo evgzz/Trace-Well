@@ -35,7 +35,7 @@ See [the annotated demonstration](examples/README.md) and [full deterministic wa
 
 ## See the trace difference
 
-The seeded FAIL in `cases/dev/auth-001.yaml` changes the **authorization condition**, while the violating reference agent continues invoking the same tool. Below is a shortened excerpt of the expected evidence structure, not an LLM result:
+The seeded FAIL in `cases/dev/auth-001.yaml` changes the **authorization condition**, while the violating reference agent continues invoking the same tool. **Illustrative schematic (manually authored, not actual CLI JSON output):** the following summarizes the expected evidence fields; it is neither captured model output nor a verbatim saved artifact:
 
 ```json
 {
@@ -58,7 +58,7 @@ python scripts/export_inspect_samples.py --case cases/dev/auth-001.yaml \
   --output results/runs/inspect-export.jsonl
 ```
 
-This exports an Inspect `Sample`-shaped JSONL record with a complete lossless CasePair in `metadata`. It is deliberately marked **NON-EXECUTABLE**: no Inspect solver, scorer, tool execution or paired evaluation is provided, and no LLM performance claim is made. See the [interoperability boundary](docs/INSPECT_EXPORT.md).
+This exports an Inspect `Sample`-shaped JSONL record with a **model-lossless** CasePair in `metadata` (faithful to its validated schema, not a byte-for-byte copy of the source YAML). It is deliberately marked **NON-EXECUTABLE**: no Inspect solver, scorer, tool execution or paired evaluation is provided, and no LLM performance claim is made. See the [interoperability boundary](docs/INSPECT_EXPORT.md).
 
 ## Evaluation model
 
