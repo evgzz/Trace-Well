@@ -8,6 +8,21 @@ permissions:
   contents: read
 
 jobs:
+  secret-scan:
+    name: Secret Scan (G7)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Scan tracked repository for high-confidence credentials
+        run: python scripts/check_secrets.py
+
   deterministic-v1-5:
     name: Deterministic V1.5 Gate
     runs-on: ubuntu-latest
@@ -32,7 +47,7 @@ jobs:
 
   po9-clean-reproduction:
     name: PO-9 Clean-Runner Reproduction
-    needs: deterministic-v1-5
+    needs: [deterministic-v1-5, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

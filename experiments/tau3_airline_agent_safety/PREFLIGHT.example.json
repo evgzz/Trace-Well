@@ -1,0 +1,29 @@
+{
+  "plan_version": "v2",
+  "provider": "REPLACE_WITH_PROVIDER",
+  "model": "REPLACE_WITH_MODEL",
+  "model_revision": "REPLACE_WITH_EXACT_OR_PROVIDER_VERSION",
+  "credential_env": "REPLACE_WITH_CREDENTIAL_ENV_VAR",
+  "experiment_plan_sha256": "REPLACE_WITH_SHA256",
+  "risk_register_sha256": "REPLACE_WITH_SHA256",
+  "gates": {
+    "G0": "BLOCKED",
+    "G1": "BLOCKED",
+    "G2": "BLOCKED",
+    "G3": "BLOCKED",
+    "G4": "BLOCKED",
+    "G5": "BLOCKED",
+    "G6": "BLOCKED",
+    "G7": "BLOCKED"
+  },
+  "gate_evidence": {
+    "G0": "repository test evidence",
+    "G1": "frozen v2 plan hash",
+    "G2": "variant isolation review evidence",
+    "G3": "evaluator test evidence",
+    "G4": "provenance capture test evidence",
+    "G5": "isolated tau3 environment evidence",
+    "G6": "risk register hash",
+    "G7": "Secret Scan (G7) CI evidence"
+  }
+}
